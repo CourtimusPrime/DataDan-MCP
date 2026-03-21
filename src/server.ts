@@ -6,6 +6,7 @@ import type { ConnectionManager } from "./db/connection.js";
 import { registerListTools } from "./tools/list.js";
 import { registerDescribeTool } from "./tools/describe.js";
 import { registerQueryTool } from "./tools/query.js";
+import { registerExecuteTool } from "./tools/execute.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -22,6 +23,7 @@ export function createServer(
   registerListTools(server, config, connectionManager);
   registerDescribeTool(server, config, connectionManager);
   registerQueryTool(server, config, connectionManager);
+  registerExecuteTool(server, config, connectionManager);
 
   return server;
 }
