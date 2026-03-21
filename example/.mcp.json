@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "datadan": {
+      "command": "npx",
+      "args": [
+        "datadan",
+        "start",
+        "--config",
+        "datadan.config.yaml"
+      ]
+    }
+  }
+}
