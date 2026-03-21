@@ -1,0 +1,33 @@
+name: claude code session
+default-permission: read
+hot-reload: true
+databases:
+  - name: my_database
+    connection_string: ${DATABASE_URL}
+    schemas:
+      - name: public
+        permission: read
+        tables:
+          - name: users
+            permission: none
+          - name: orders
+            permission: read
+          - name: analytics
+            permission: write
+      - name: private
+        permission: write
+        tables:
+          - name: secrets
+            permission: write
+  - name: another_database
+    connection_string: ${ANOTHER_DATABASE_URL}
+    schemas:
+      - name: main
+        permission: read
+        tables:
+          - name: products
+            permission: read
+          - name: sales
+            permission: read
+      - name: archive
+        permission: yolo
