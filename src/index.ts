@@ -4,9 +4,11 @@ import { Command } from "commander";
 import { existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadConfig } from "./config/parser.js";
+import { resolvePermission } from "./config/resolver.js";
 import { ConnectionManager } from "./db/connection.js";
 import { syncSchema } from "./db/sync.js";
 import { createServer, startServer } from "./server.js";
+import type { DataDanConfig } from "./config/schema.js";
 
 const CONFIG_FILENAME = "datadan.config.yaml";
 
@@ -79,7 +81,8 @@ program
   .command("start")
   .description("Start the DataDan MCP server")
   .option("--config <path>", "Path to datadan.config.yaml")
-  .action(async (opts: { config?: string }) => {
+  .option("--dry-run", "Show resolved permissions without starting the server")
+  .action(async (opts: { config?: string; dryRun?: boolean }) => {
     // Resolve config path: --config flag > DATADAN_CONFIG env > ./datadan.config.yaml
     const configPath = resolve(
       opts.config ?? process.env.DATADAN_CONFIG ?? join(process.cwd(), CONFIG_FILENAME),
@@ -136,10 +139,76 @@ program
       console.error(`[datadan] Warning: Schema sync failed: ${(err as Error).message}`);
     }
 
+    if (opts.dryRun) {
+      printPermissionSummary(config);
+      await connectionManager.disconnect();
+      process.exit(0);
+    }
+
     const server = createServer(config, connectionManager, configPath);
     await startServer(server);
 
     console.error(`[datadan] MCP server started (${config.databases.length} database(s) configured)`);
   });
+
+function printPermissionSummary(config: DataDanConfig): void {
+  const rows: Array<{ database: string; schema: string; table: string; permission: string }> = [];
+
+  for (const db of config.databases) {
+    if (!db.schemas || db.schemas.length === 0) {
+      // Database with no schemas discovered — show database-level default
+      const perm = db.permission ?? config["default-permission"];
+      rows.push({ database: db.name, schema: "-", table: "-", permission: perm });
+      continue;
+    }
+    for (const schema of db.schemas) {
+      if (!schema.tables || schema.tables.length === 0) {
+        // Schema with no tables discovered — show schema-level default
+        const perm = schema.permission ?? db.permission ?? config["default-permission"];
+        rows.push({ database: db.name, schema: schema.name, table: "-", permission: perm });
+        continue;
+      }
+      for (const table of schema.tables) {
+        const perm = resolvePermission(config, db.name, schema.name, table.name);
+        rows.push({ database: db.name, schema: schema.name, table: table.name, permission: perm });
+      }
+    }
+  }
+
+  if (rows.length === 0) {
+    console.log("No databases configured.");
+    return;
+  }
+
+  // Calculate column widths
+  const headers = { database: "Database", schema: "Schema", table: "Table", permission: "Permission" };
+  const widths = {
+    database: Math.max(headers.database.length, ...rows.map((r) => r.database.length)),
+    schema: Math.max(headers.schema.length, ...rows.map((r) => r.schema.length)),
+    table: Math.max(headers.table.length, ...rows.map((r) => r.table.length)),
+    permission: Math.max(headers.permission.length, ...rows.map((r) => formatPermission(r.permission).length)),
+  };
+
+  const pad = (s: string, w: number) => s.padEnd(w);
+  const sep = `${"─".repeat(widths.database + 2)}┼${"─".repeat(widths.schema + 2)}┼${"─".repeat(widths.table + 2)}┼${"─".repeat(widths.permission + 2)}`;
+
+  // Print header
+  console.log(
+    ` ${pad(headers.database, widths.database)} │ ${pad(headers.schema, widths.schema)} │ ${pad(headers.table, widths.table)} │ ${pad(headers.permission, widths.permission)}`,
+  );
+  console.log(sep);
+
+  // Print rows
+  for (const row of rows) {
+    const perm = formatPermission(row.permission);
+    console.log(
+      ` ${pad(row.database, widths.database)} │ ${pad(row.schema, widths.schema)} │ ${pad(row.table, widths.table)} │ ${pad(perm, widths.permission)}`,
+    );
+  }
+}
+
+function formatPermission(permission: string): string {
+  return permission === "yolo" ? "⚠ yolo" : permission;
+}
 
 program.parse();
