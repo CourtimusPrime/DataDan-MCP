@@ -1,0 +1,51 @@
+name: multi-db-workspace
+default-permission: read
+hot-reload: true
+databases:
+  - name: sandbox
+    connection_string: ${SANDBOX_DATABASE_URL}
+    schemas:
+      - name: catalog
+        tables:
+          - name: albums
+          - name: artists
+          - name: genres
+          - name: tracks
+      - name: inventory
+        tables:
+          - name: stock
+          - name: suppliers
+          - name: warehouses
+      - name: public
+        tables: []
+      - name: sales
+        tables:
+          - name: customers
+          - name: order_items
+          - name: orders
+          - name: reviews
+  - name: analytics
+    connection_string: ${ANALYTICS_DB_URL}
+    schemas:
+      - name: logistics
+        tables:
+          - name: launch_sites
+          - name: supply_manifests
+      - name: missions
+        tables:
+          - name: crew_assignments
+          - name: destinations
+          - name: mission_events
+          - name: missions
+          - name: spacecraft
+      - name: personnel
+        tables:
+          - name: astronauts
+          - name: certifications
+          - name: departments
+      - name: public
+        tables: []
+      - name: research
+        tables:
+          - name: experiments
+          - name: publications

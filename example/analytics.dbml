@@ -1,0 +1,146 @@
+Table logistics.launch_sites {
+  id integer [pk, not null, default: 'nextval('logistics.launch_sites_id_seq'::regclass)']
+  name character varying [not null, unique]
+  country character varying [not null]
+  latitude numeric
+  longitude numeric
+  pad_count integer [default: '1']
+  active boolean [default: 'true']
+}
+
+Table logistics.supply_manifests {
+  id integer [pk, not null, default: 'nextval('logistics.supply_manifests_id_seq'::regclass)']
+  mission_id integer [not null]
+  launch_site_id integer
+  cargo_type character varying
+  mass_kg numeric
+  priority character varying [default: ''normal'::character varying']
+  delivered boolean [default: 'false']
+  notes text
+}
+
+Table missions.crew_assignments {
+  id integer [pk, not null, default: 'nextval('missions.crew_assignments_id_seq'::regclass)']
+  mission_id integer [not null, unique]
+  astronaut_id integer [not null, unique]
+  role character varying [not null]
+  is_commander boolean [default: 'false']
+}
+
+Table missions.destinations {
+  id integer [pk, not null, default: 'nextval('missions.destinations_id_seq'::regclass)']
+  name character varying [not null, unique]
+  type character varying
+  distance_km numeric
+  orbital_period_days numeric
+  gravity_ms2 numeric
+  has_atmosphere boolean [default: 'false']
+  notes text
+}
+
+Table missions.mission_events {
+  id integer [pk, not null, default: 'nextval('missions.mission_events_id_seq'::regclass)']
+  mission_id integer [not null]
+  event_time timestamp with time zone [not null]
+  event_type character varying
+  description text
+  severity character varying [default: ''info'::character varying']
+}
+
+Table missions.missions {
+  id integer [pk, not null, default: 'nextval('missions.missions_id_seq'::regclass)']
+  name character varying [not null, unique]
+  designation character varying
+  spacecraft_id integer
+  destination_id integer
+  launch_date timestamp with time zone
+  return_date timestamp with time zone
+  status character varying [default: ''planned'::character varying']
+  objective text
+  budget numeric
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table missions.spacecraft {
+  id integer [pk, not null, default: 'nextval('missions.spacecraft_id_seq'::regclass)']
+  name character varying [not null, unique]
+  class character varying [not null]
+  manufacturer character varying
+  crew_capacity integer
+  mass_kg numeric
+  first_flight date
+  status character varying [default: ''operational'::character varying']
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table personnel.astronauts {
+  id integer [pk, not null, default: 'nextval('personnel.astronauts_id_seq'::regclass)']
+  first_name character varying [not null]
+  last_name character varying [not null]
+  callsign character varying [unique]
+  nationality character varying [not null]
+  date_of_birth date [not null]
+  department_id integer
+  rank character varying
+  status character varying [default: ''active'::character varying']
+  flight_hours integer [default: '0']
+  eva_count integer [default: '0']
+  joined_at date [not null]
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table personnel.certifications {
+  id integer [pk, not null, default: 'nextval('personnel.certifications_id_seq'::regclass)']
+  astronaut_id integer [not null, unique]
+  name character varying [not null, unique]
+  issued_date date [not null]
+  expiry_date date
+  issuing_body character varying
+}
+
+Table personnel.departments {
+  id integer [pk, not null, default: 'nextval('personnel.departments_id_seq'::regclass)']
+  name character varying [not null, unique]
+  division character varying
+  budget numeric
+  head_count integer [default: '0']
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table research.experiments {
+  id integer [pk, not null, default: 'nextval('research.experiments_id_seq'::regclass)']
+  title character varying [not null]
+  mission_id integer
+  lead_astronaut_id integer
+  discipline character varying
+  status character varying [default: ''proposed'::character varying']
+  start_date date
+  end_date date
+  summary text
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table research.publications {
+  id integer [pk, not null, default: 'nextval('research.publications_id_seq'::regclass)']
+  experiment_id integer
+  title character varying [not null]
+  journal character varying
+  doi character varying [unique]
+  published_date date
+  citation_count integer [default: '0']
+  abstract text
+}
+
+// References
+Ref: logistics.supply_manifests.mission_id > missions.missions.id
+Ref: logistics.supply_manifests.launch_site_id > logistics.launch_sites.id
+Ref: missions.crew_assignments.mission_id > missions.missions.id
+Ref: missions.crew_assignments.astronaut_id > personnel.astronauts.id
+Ref: missions.mission_events.mission_id > missions.missions.id
+Ref: missions.missions.spacecraft_id > missions.spacecraft.id
+Ref: missions.missions.destination_id > missions.destinations.id
+Ref: personnel.astronauts.department_id > personnel.departments.id
+Ref: personnel.certifications.astronaut_id > personnel.astronauts.id
+Ref: research.experiments.mission_id > missions.missions.id
+Ref: research.experiments.lead_astronaut_id > personnel.astronauts.id
+Ref: research.publications.experiment_id > research.experiments.id

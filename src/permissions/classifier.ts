@@ -36,7 +36,10 @@ function higherPermission(a: PermissionLevel, b: PermissionLevel): PermissionLev
   return PERMISSION_ORDER.indexOf(a) >= PERMISSION_ORDER.indexOf(b) ? a : b;
 }
 
-function extractTables(sql: string): Array<{ schema: string; table: string }> {
+function extractTables(
+  sql: string,
+  ast?: ReturnType<typeof parser.astify>,
+): Array<{ schema: string; table: string }> {
   const tableList = parser.tableList(sql, { database: "PostgresQL" });
   const seen = new Set<string>();
   const tables: Array<{ schema: string; table: string }> = [];
@@ -50,6 +53,26 @@ function extractTables(sql: string): Array<{ schema: string; table: string }> {
     if (!seen.has(key)) {
       seen.add(key);
       tables.push({ schema, table });
+    }
+  }
+
+  // Fallback: node-sql-parser's tableList() returns [] for ALTER TABLE even
+  // though the AST contains the table reference. Extract from AST directly.
+  if (tables.length === 0 && ast) {
+    const statements = Array.isArray(ast) ? ast : [ast];
+    for (const stmt of statements) {
+      const tableField = (stmt as { table?: Array<{ db: string | null; table: string }> }).table;
+      if (Array.isArray(tableField)) {
+        for (const t of tableField) {
+          const schema = t.db ?? "public";
+          const table = t.table;
+          const key = `${schema}.${table}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            tables.push({ schema, table });
+          }
+        }
+      }
     }
   }
 
@@ -99,7 +122,7 @@ export function classifyQuery(sql: string): ClassifiedQuery {
     }
   }
 
-  const referencedTables = extractTables(sql);
+  const referencedTables = extractTables(sql, ast);
 
   return {
     statementType: primaryStatementType!,

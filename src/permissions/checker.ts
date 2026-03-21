@@ -19,6 +19,23 @@ export function checkQueryPermission(
 ): CheckResult {
   const { requiredPermission, referencedTables } = classifiedQuery;
 
+  // Safety check: if we couldn't identify any tables and the operation is
+  // mutating, deny by default rather than silently allowing.
+  if (referencedTables.length === 0 && requiredPermission !== "read") {
+    return {
+      allowed: false,
+      error: {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Could not determine target tables for this statement. Permission denied for safety.",
+          },
+        ],
+      },
+    };
+  }
+
   for (const { schema, table } of referencedTables) {
     const currentLevel = resolvePermission(config, databaseName, schema, table);
     const allowedOps = PERMISSION_HIERARCHY[currentLevel];

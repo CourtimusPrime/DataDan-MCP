@@ -1,0 +1,117 @@
+Table catalog.albums {
+  id integer [pk, not null, default: 'nextval('catalog.albums_id_seq'::regclass)']
+  title character varying [not null]
+  artist_id integer [not null]
+  genre_id integer
+  release_year integer
+  label character varying
+  format character varying [default: ''LP'::character varying']
+  condition character varying [default: ''Mint'::character varying']
+  price numeric [not null]
+  created_at timestamp with time zone [default: 'now()']
+  test_col text
+}
+
+Table catalog.artists {
+  id integer [pk, not null, default: 'nextval('catalog.artists_id_seq'::regclass)']
+  name character varying [not null]
+  country character varying
+  formed_year integer
+  bio text
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table catalog.genres {
+  id integer [pk, not null, default: 'nextval('catalog.genres_id_seq'::regclass)']
+  name character varying [not null, unique]
+  description text
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table catalog.tracks {
+  id integer [pk, not null, default: 'nextval('catalog.tracks_id_seq'::regclass)']
+  album_id integer [not null, unique]
+  track_number integer [not null, unique]
+  title character varying [not null]
+  duration_seconds integer
+  side character
+}
+
+Table inventory.stock {
+  id integer [pk, not null, default: 'nextval('inventory.stock_id_seq'::regclass)']
+  album_id integer [not null, unique]
+  warehouse_id integer [not null, unique]
+  quantity integer [not null, default: '0']
+  reorder_point integer [default: '5']
+  last_restocked timestamp with time zone
+  test_col text
+}
+
+Table inventory.suppliers {
+  id integer [pk, not null, default: 'nextval('inventory.suppliers_id_seq'::regclass)']
+  name character varying [not null]
+  contact_email character varying
+  country character varying
+  lead_time_days integer
+  rating numeric
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table inventory.warehouses {
+  id integer [pk, not null, default: 'nextval('inventory.warehouses_id_seq'::regclass)']
+  name character varying [not null]
+  city character varying [not null]
+  state character varying
+  capacity integer [not null]
+  created_at timestamp with time zone [default: 'now()']
+}
+
+Table sales.customers {
+  id integer [pk, not null, default: 'nextval('sales.customers_id_seq'::regclass)']
+  first_name character varying [not null]
+  last_name character varying [not null]
+  email character varying [not null, unique]
+  city character varying
+  joined_at timestamp with time zone [default: 'now()']
+  loyalty_tier character varying [default: ''Bronze'::character varying']
+}
+
+Table sales.order_items {
+  id integer [pk, not null, default: 'nextval('sales.order_items_id_seq'::regclass)']
+  order_id integer [not null]
+  album_id integer [not null]
+  quantity integer [not null, default: '1']
+  unit_price numeric [not null]
+}
+
+Table sales.orders {
+  id integer [pk, not null, default: 'nextval('sales.orders_id_seq'::regclass)']
+  customer_id integer [not null]
+  order_date timestamp with time zone [default: 'now()']
+  status character varying [default: ''pending'::character varying']
+  total numeric
+  shipping_address text
+  test_col text
+}
+
+Table sales.reviews {
+  id integer [pk, not null, default: 'nextval('sales.reviews_id_seq'::regclass)']
+  customer_id integer [not null, unique]
+  album_id integer [not null, unique]
+  rating integer [not null]
+  title character varying
+  body text
+  created_at timestamp with time zone [default: 'now()']
+}
+
+// References
+Ref: catalog.albums.artist_id > catalog.artists.id
+Ref: catalog.albums.genre_id > catalog.genres.id
+Ref: catalog.tracks.album_id > catalog.albums.id
+Ref: inventory.stock.album_id > catalog.albums.id
+Ref: inventory.stock.warehouse_id > inventory.warehouses.id
+Ref: sales.order_items.order_id > sales.orders.id
+Ref: sales.order_items.album_id > catalog.albums.id
+Ref: sales.orders.customer_id > sales.customers.id
+Ref: sales.reviews.customer_id > sales.customers.id
+Ref: sales.reviews.album_id > catalog.albums.id

@@ -28,6 +28,7 @@ export type SchemaConfig = z.infer<typeof SchemaConfigSchema>;
 export const DatabaseConfigSchema = z.object({
   name: z.string(),
   connection_string: z.string(),
+  _connection_string_template: z.string().optional(),
   permission: PermissionLevelSchema.optional(),
   schemas: z.array(SchemaConfigSchema).optional(),
 });
