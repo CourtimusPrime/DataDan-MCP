@@ -16,6 +16,23 @@ export const PERMISSION_HIERARCHY: Record<PermissionLevel, string[]> = {
  * Resolves the effective permission for a specific table by cascading:
  * table-level -> schema-level -> database-level -> config default-permission
  */
+/**
+ * Resolves the effective permission for a schema (without a specific table).
+ */
+export function resolveSchemaPermission(
+  config: DataDanConfig,
+  database: string,
+  schema: string,
+): PermissionLevel {
+  const dbConfig = config.databases.find((db) => db.name === database);
+  if (!dbConfig) return config["default-permission"];
+
+  const schemaConfig = dbConfig.schemas?.find((s) => s.name === schema);
+  if (!schemaConfig) return dbConfig.permission ?? config["default-permission"];
+
+  return schemaConfig.permission ?? dbConfig.permission ?? config["default-permission"];
+}
+
 export function resolvePermission(
   config: DataDanConfig,
   database: string,

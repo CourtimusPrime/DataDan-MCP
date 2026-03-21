@@ -1,6 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import yaml from "js-yaml";
 import { DataDanConfigSchema, type DataDanConfig } from "./schema.js";
+
+export function writeConfig(config: DataDanConfig, configPath: string): void {
+  const yamlStr = yaml.dump(config, { lineWidth: -1, quotingType: '"' });
+  writeFileSync(configPath, yamlStr, "utf-8");
+}
 
 function interpolateEnvVars(connectionString: string): string {
   return connectionString.replace(/\$\{(\w+)\}/g, (match, varName: string) => {

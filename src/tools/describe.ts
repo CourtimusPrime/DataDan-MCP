@@ -5,6 +5,7 @@ import type { ConnectionManager } from "../db/connection.js";
 import { resolvePermission } from "../config/resolver.js";
 import { getColumns } from "../db/introspect.js";
 import { buildPermissionError } from "../permissions/errors.js";
+import { findDatabaseOrError, mcpError, mcpSuccess } from "./helpers.js";
 
 export function registerDescribeTool(
   server: McpServer,
@@ -22,30 +23,12 @@ export function registerDescribeTool(
       },
     },
     async ({ database_name, schema_name, table_name }) => {
-      // Check database exists in config
-      const dbConfig = config.databases.find((db) => db.name === database_name);
-      if (!dbConfig) {
-        return {
-          isError: true as const,
-          content: [
-            {
-              type: "text" as const,
-              text: `Database '${database_name}' not found. Available databases: ${config.databases.map((db) => db.name).join(", ")}`,
-            },
-          ],
-        };
-      }
+      const dbLookup = findDatabaseOrError(config, database_name);
+      if ("error" in dbLookup) return dbLookup.error;
 
-      // Check permission >= read
       const permission = resolvePermission(config, database_name, schema_name, table_name);
       if (permission === "none") {
-        const error = buildPermissionError(
-          "describe_table",
-          `${schema_name}.${table_name}`,
-          "read",
-          "none",
-        );
-        return { ...error };
+        return buildPermissionError("describe_table", `${schema_name}.${table_name}`, "read", "none");
       }
 
       try {
@@ -53,18 +36,10 @@ export function registerDescribeTool(
         const columns = await getColumns(pool, schema_name, table_name);
 
         if (columns.length === 0) {
-          return {
-            isError: true as const,
-            content: [
-              {
-                type: "text" as const,
-                text: `Table '${schema_name}.${table_name}' not found in database '${database_name}'.`,
-              },
-            ],
-          };
+          return mcpError(`Table '${schema_name}.${table_name}' not found in database '${database_name}'.`);
         }
 
-        const result = {
+        return mcpSuccess({
           database: database_name,
           schema: schema_name,
           table: table_name,
@@ -73,35 +48,11 @@ export function registerDescribeTool(
             if (col.isPrimaryKey) constraints.push("PRIMARY KEY");
             if (col.isForeignKey) constraints.push(`FOREIGN KEY -> ${col.foreignKeyRef}`);
             if (col.isUnique) constraints.push("UNIQUE");
-
-            return {
-              name: col.name,
-              type: col.dataType,
-              nullable: col.nullable,
-              default: col.defaultValue,
-              constraints,
-            };
+            return { name: col.name, type: col.dataType, nullable: col.nullable, default: col.defaultValue, constraints };
           }),
-        };
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
+        });
       } catch (error) {
-        return {
-          isError: true as const,
-          content: [
-            {
-              type: "text" as const,
-              text: `Error describing table '${schema_name}.${table_name}' in database '${database_name}': ${(error as Error).message}`,
-            },
-          ],
-        };
+        return mcpError(`Error describing table '${schema_name}.${table_name}' in database '${database_name}': ${(error as Error).message}`);
       }
     },
   );

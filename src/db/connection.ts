@@ -30,9 +30,10 @@ export class ConnectionManager {
 
   async connect(): Promise<ConnectionStatus> {
     const status: ConnectionStatus = { successes: [], failures: [] };
+    const entries = [...this.pools.entries()];
 
     const results = await Promise.allSettled(
-      [...this.pools.entries()].map(async ([name, pool]) => {
+      entries.map(async ([name, pool]) => {
         const client = await pool.connect();
         try {
           await client.query("SELECT 1");
@@ -43,15 +44,12 @@ export class ConnectionManager {
       }),
     );
 
-    for (const result of results) {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
       if (result.status === "fulfilled") {
         status.successes.push(result.value);
       } else {
-        const error = result.reason as Error;
-        // Extract the database name from the error context
-        const idx = results.indexOf(result);
-        const name = [...this.pools.keys()][idx];
-        status.failures.push({ database: name, error: error.message });
+        status.failures.push({ database: entries[i][0], error: (result.reason as Error).message });
       }
     }
 

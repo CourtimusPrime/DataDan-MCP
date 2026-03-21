@@ -1,6 +1,7 @@
 import type { PermissionLevel } from "../config/schema.js";
 
 export interface McpError {
+  [x: string]: unknown;
   isError: true;
   content: Array<{ type: "text"; text: string }>;
 }

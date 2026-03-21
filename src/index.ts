@@ -88,18 +88,12 @@ program
       opts.config ?? process.env.DATADAN_CONFIG ?? join(process.cwd(), CONFIG_FILENAME),
     );
 
-    if (!existsSync(configPath)) {
-      console.error(
-        `Error: No config file found at '${configPath}'.\nRun 'datadan init' to create one, or use --config <path> to specify a location.`,
-      );
-      process.exit(1);
-    }
-
     let config;
     try {
       config = loadConfig(configPath);
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);
+      console.error("Run 'datadan init' to create a config, or use --config <path> to specify a location.");
       process.exit(1);
     }
 

@@ -1,6 +1,5 @@
-import { writeFileSync } from "node:fs";
-import yaml from "js-yaml";
 import type { DataDanConfig, SchemaConfig, TableConfig } from "../config/schema.js";
+import { writeConfig } from "../config/parser.js";
 import type { ConnectionManager } from "./connection.js";
 import { getSchemas, getTables } from "./introspect.js";
 
@@ -38,15 +37,17 @@ export async function syncSchema(
 
     const liveSchemaSet = new Set(liveSchemas);
 
-    // Build a map of live tables per schema
+    // Build a map of live tables per schema (parallel)
     const liveTablesMap = new Map<string, Set<string>>();
-    for (const schemaName of liveSchemas) {
-      try {
+    const tableResults = await Promise.allSettled(
+      liveSchemas.map(async (schemaName) => {
         const tables = await getTables(pool, schemaName);
-        liveTablesMap.set(schemaName, new Set(tables));
-      } catch {
-        // If we can't get tables for a schema, skip it
-        continue;
+        return { schemaName, tables };
+      }),
+    );
+    for (const result of tableResults) {
+      if (result.status === "fulfilled") {
+        liveTablesMap.set(result.value.schemaName, new Set(result.value.tables));
       }
     }
 
@@ -119,9 +120,11 @@ export async function syncSchema(
     }
   }
 
-  // Write reconciled config back to YAML
-  const yamlStr = yaml.dump(config, { lineWidth: -1, quotingType: '"' });
-  writeFileSync(configPath, yamlStr, "utf-8");
+  // Only write if something changed
+  const { added, removed } = summary;
+  if (added.schemas > 0 || added.tables > 0 || removed.schemas > 0 || removed.tables > 0) {
+    writeConfig(config, configPath);
+  }
 
   return summary;
 }

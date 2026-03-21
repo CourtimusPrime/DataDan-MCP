@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { writeFileSync } from "node:fs";
 import pg from "pg";
-import yaml from "js-yaml";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { DataDanConfig } from "../config/schema.js";
 import type { ConnectionManager } from "../db/connection.js";
+import { writeConfig } from "../config/parser.js";
 import { getSchemas, getTables } from "../db/introspect.js";
+import { mcpError, mcpSuccess } from "./helpers.js";
 
 const { Pool } = pg;
 
@@ -28,21 +28,11 @@ export function registerRegisterTool(
       },
     },
     async ({ database_name, connection_string }) => {
-      // Check if database already exists
       const existing = config.databases.find((db) => db.name === database_name);
       if (existing) {
-        return {
-          isError: true as const,
-          content: [
-            {
-              type: "text" as const,
-              text: `Database '${database_name}' is already registered.`,
-            },
-          ],
-        };
+        return mcpError(`Database '${database_name}' is already registered.`);
       }
 
-      // Validate connection by attempting to connect
       const testPool = new Pool({ connectionString: connection_string });
       try {
         const client = await testPool.connect();
@@ -53,103 +43,52 @@ export function registerRegisterTool(
         }
       } catch (error) {
         await testPool.end();
-        return {
-          isError: true as const,
-          content: [
-            {
-              type: "text" as const,
-              text: `Connection test failed for '${database_name}': ${(error as Error).message}`,
-            },
-          ],
-        };
+        return mcpError(`Connection test failed for '${database_name}': ${(error as Error).message}`);
       }
 
-      // Discover schemas and tables
-      const defaultPermission = config["default-permission"];
       let discoveredSchemas: { name: string; tables: { name: string }[] }[];
       try {
         const schemaNames = await getSchemas(testPool);
-        discoveredSchemas = [];
-        for (const schemaName of schemaNames) {
-          const tableNames = await getTables(testPool, schemaName);
-          discoveredSchemas.push({
-            name: schemaName,
-            tables: tableNames.map((t) => ({ name: t })),
-          });
-        }
+        discoveredSchemas = await Promise.all(
+          schemaNames.map(async (schemaName) => {
+            const tableNames = await getTables(testPool, schemaName);
+            return { name: schemaName, tables: tableNames.map((t) => ({ name: t })) };
+          }),
+        );
       } catch (error) {
         await testPool.end();
-        return {
-          isError: true as const,
-          content: [
-            {
-              type: "text" as const,
-              text: `Schema discovery failed for '${database_name}': ${(error as Error).message}`,
-            },
-          ],
-        };
+        return mcpError(`Schema discovery failed for '${database_name}': ${(error as Error).message}`);
       }
 
-      // Clean up test pool — ConnectionManager will create its own
       await testPool.end();
 
-      // Build the new database config entry
       const newDbConfig = {
         name: database_name,
         connection_string,
-        schemas: discoveredSchemas.map((s) => ({
-          name: s.name,
-          tables: s.tables.map((t) => ({ name: t.name })),
-        })),
+        schemas: discoveredSchemas,
       };
 
-      // Add to in-memory config
       config.databases.push(newDbConfig);
-
-      // Add pool to ConnectionManager
       connectionManager.addPool(database_name, connection_string);
 
-      // Write updated config back to YAML
       try {
-        const yamlStr = yaml.dump(config, { lineWidth: -1, quotingType: '"' });
-        writeFileSync(configPath, yamlStr, "utf-8");
+        writeConfig(config, configPath);
       } catch (error) {
-        return {
-          isError: true as const,
-          content: [
-            {
-              type: "text" as const,
-              text: `Database registered in-memory but failed to persist config: ${(error as Error).message}`,
-            },
-          ],
-        };
+        return mcpError(`Database registered in-memory but failed to persist config: ${(error as Error).message}`);
       }
 
       const schemaNames = discoveredSchemas.map((s) => s.name);
-      const totalTables = discoveredSchemas.reduce(
-        (sum, s) => sum + s.tables.length,
-        0,
-      );
+      const totalTables = discoveredSchemas.reduce((sum, s) => sum + s.tables.length, 0);
+      const defaultPermission = config["default-permission"];
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(
-              {
-                status: "success",
-                database: database_name,
-                defaultPermission,
-                schemasDiscovered: schemaNames,
-                totalTables,
-                message: `Database '${database_name}' registered successfully with ${schemaNames.length} schemas and ${totalTables} tables. Default permission '${defaultPermission}' applies.`,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+      return mcpSuccess({
+        status: "success",
+        database: database_name,
+        defaultPermission,
+        schemasDiscovered: schemaNames,
+        totalTables,
+        message: `Database '${database_name}' registered successfully with ${schemaNames.length} schemas and ${totalTables} tables. Default permission '${defaultPermission}' applies.`,
+      });
     },
   );
 }
