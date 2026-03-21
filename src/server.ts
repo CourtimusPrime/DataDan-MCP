@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -19,8 +20,9 @@ const pkg = require("../package.json") as { version: string };
 
 /**
  * Installs hot-reload middleware by wrapping server.registerTool so that
- * every tool handler re-reads the config file and re-runs schema sync
- * before executing.
+ * every tool handler checks whether the config file has changed (by mtime)
+ * and only re-reads + re-syncs when needed. Schema sync is also rate-limited
+ * to avoid hammering remote databases on every call.
  */
 function installHotReload(
   server: McpServer,
@@ -29,6 +31,14 @@ function installHotReload(
   configPath: string,
 ): void {
   let lastValidConfig: DataDanConfig = structuredClone(config);
+  let lastConfigMtimeMs = 0;
+  let lastSyncTime = Date.now(); // Startup already ran sync
+  const SYNC_INTERVAL_MS = 30_000; // Only re-sync schema every 30s
+
+  // Get initial mtime
+  try {
+    lastConfigMtimeMs = statSync(configPath).mtimeMs;
+  } catch { /* ignore */ }
 
   const originalRegisterTool = server.registerTool.bind(server);
 
@@ -36,9 +46,27 @@ function installHotReload(
   (server as any).registerTool = (name: string, toolDef: any, handler: (...args: any[]) => any) => {
     const wrappedHandler = async (...args: any[]) => {
       try {
-        const freshConfig = loadConfig(configPath);
-        Object.assign(config, freshConfig);
-        await syncSchema(config, connectionManager, configPath);
+        // Check if config file has actually changed
+        let currentMtimeMs = lastConfigMtimeMs;
+        try {
+          currentMtimeMs = statSync(configPath).mtimeMs;
+        } catch { /* ignore */ }
+
+        const configChanged = currentMtimeMs !== lastConfigMtimeMs;
+        const now = Date.now();
+        const syncDue = (now - lastSyncTime) > SYNC_INTERVAL_MS;
+
+        if (configChanged) {
+          const freshConfig = loadConfig(configPath);
+          Object.assign(config, freshConfig);
+          lastConfigMtimeMs = currentMtimeMs;
+        }
+
+        if (configChanged || syncDue) {
+          await syncSchema(config, connectionManager, configPath);
+          lastSyncTime = now;
+        }
+
         lastValidConfig = structuredClone(config);
       } catch (error) {
         console.error(

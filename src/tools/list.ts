@@ -3,7 +3,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { DataDanConfig } from "../config/schema.js";
 import type { ConnectionManager } from "../db/connection.js";
 import { resolvePermission, resolveSchemaPermission } from "../config/resolver.js";
-import { getSchemas, getTables } from "../db/introspect.js";
 import { findDatabaseOrError, mcpError, mcpSuccess } from "./helpers.js";
 
 /**
@@ -33,7 +32,7 @@ function isDatabaseAccessible(config: DataDanConfig, dbName: string): boolean {
 export function registerListTools(
   server: McpServer,
   config: DataDanConfig,
-  connectionManager: ConnectionManager,
+  _connectionManager: ConnectionManager,
 ): void {
   server.registerTool(
     "list_databases",
@@ -61,16 +60,12 @@ export function registerListTools(
       const dbLookup = findDatabaseOrError(config, database_name);
       if ("error" in dbLookup) return dbLookup.error;
 
-      try {
-        const pool = connectionManager.getPool(database_name);
-        const schemas = await getSchemas(pool);
-        const accessibleSchemas = schemas.filter(
-          (schema) => resolveSchemaPermission(config, database_name, schema) !== "none",
-        );
-        return mcpSuccess({ database: database_name, schemas: accessibleSchemas });
-      } catch (error) {
-        return mcpError(`Error listing schemas for database '${database_name}': ${(error as Error).message}`);
-      }
+      // Serve from synced config — schema sync already reconciled against live DB
+      const schemas = dbLookup.dbConfig.schemas ?? [];
+      const accessibleSchemas = schemas
+        .filter((s) => resolveSchemaPermission(config, database_name, s.name) !== "none")
+        .map((s) => s.name);
+      return mcpSuccess({ database: database_name, schemas: accessibleSchemas });
     },
   );
 
@@ -87,21 +82,16 @@ export function registerListTools(
       const dbLookup = findDatabaseOrError(config, database_name);
       if ("error" in dbLookup) return dbLookup.error;
 
-      try {
-        const pool = connectionManager.getPool(database_name);
-        const tables = await getTables(pool, schema_name);
-
-        if (tables.length === 0) {
-          return mcpError(`Schema '${schema_name}' not found or has no tables in database '${database_name}'.`);
-        }
-
-        const accessibleTables = tables.filter(
-          (table) => resolvePermission(config, database_name, schema_name, table) !== "none",
-        );
-        return mcpSuccess({ database: database_name, schema: schema_name, tables: accessibleTables });
-      } catch (error) {
-        return mcpError(`Error listing tables for '${database_name}.${schema_name}': ${(error as Error).message}`);
+      // Serve from synced config — schema sync already reconciled against live DB
+      const schemaConfig = dbLookup.dbConfig.schemas?.find((s) => s.name === schema_name);
+      if (!schemaConfig || !schemaConfig.tables || schemaConfig.tables.length === 0) {
+        return mcpError(`Schema '${schema_name}' not found or has no tables in database '${database_name}'.`);
       }
+
+      const accessibleTables = schemaConfig.tables
+        .filter((t) => resolvePermission(config, database_name, schema_name, t.name) !== "none")
+        .map((t) => t.name);
+      return mcpSuccess({ database: database_name, schema: schema_name, tables: accessibleTables });
     },
   );
 }

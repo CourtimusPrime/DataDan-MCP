@@ -5,7 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { DataDanConfig } from "../config/schema.js";
 import type { ConnectionManager } from "../db/connection.js";
 import { resolvePermission, resolveSchemaPermission } from "../config/resolver.js";
-import { getSchemas, getTables, getColumns } from "../db/introspect.js";
+import { getColumns } from "../db/introspect.js";
 import type { ColumnInfo } from "../db/introspect.js";
 import { findDatabaseOrError, mcpError, mcpSuccess } from "./helpers.js";
 
@@ -37,39 +37,51 @@ export function registerDbmlTool(
 
       try {
         const pool = connectionManager.getPool(database_name);
-        const schemas = await getSchemas(pool);
 
-        const accessibleSchemas = schemas.filter(
-          (schema) => resolveSchemaPermission(config, database_name, schema) !== "none",
+        // Use synced config to get schemas/tables, only hit DB for columns
+        const dbConfig = dbLookup.dbConfig;
+        const accessibleSchemas = (dbConfig.schemas ?? []).filter(
+          (s) => resolveSchemaPermission(config, database_name, s.name) !== "none",
+        );
+
+        // Build list of all accessible tables across all schemas
+        const tableJobs: Array<{ schemaName: string; tableName: string }> = [];
+        for (const schemaConfig of accessibleSchemas) {
+          const accessibleTables = (schemaConfig.tables ?? []).filter(
+            (t) => resolvePermission(config, database_name, schemaConfig.name, t.name) !== "none",
+          );
+          for (const t of accessibleTables) {
+            tableJobs.push({ schemaName: schemaConfig.name, tableName: t.name });
+          }
+        }
+
+        // Fetch all column info in parallel
+        const columnResults = await Promise.all(
+          tableJobs.map(async ({ schemaName, tableName }) => {
+            const columns = await getColumns(pool, schemaName, tableName);
+            return { schemaName, tableName, columns };
+          }),
         );
 
         const dbmlLines: string[] = [];
         const refs: string[] = [];
         let tableCount = 0;
 
-        for (const schemaName of accessibleSchemas) {
-          const tables = await getTables(pool, schemaName);
-          const accessibleTables = tables.filter(
-            (table) => resolvePermission(config, database_name, schemaName, table) !== "none",
-          );
+        for (const { schemaName, tableName, columns } of columnResults) {
+          if (columns.length === 0) continue;
 
-          for (const tableName of accessibleTables) {
-            const columns = await getColumns(pool, schemaName, tableName);
-            if (columns.length === 0) continue;
+          tableCount++;
+          dbmlLines.push(`Table ${schemaName}.${tableName} {`);
 
-            tableCount++;
-            dbmlLines.push(`Table ${schemaName}.${tableName} {`);
-
-            for (const col of columns) {
-              dbmlLines.push(`  ${col.name} ${col.dataType}${columnSettings(col)}`);
-              if (col.isForeignKey && col.foreignKeyRef) {
-                refs.push(`Ref: ${schemaName}.${tableName}.${col.name} > ${col.foreignKeyRef}`);
-              }
+          for (const col of columns) {
+            dbmlLines.push(`  ${col.name} ${col.dataType}${columnSettings(col)}`);
+            if (col.isForeignKey && col.foreignKeyRef) {
+              refs.push(`Ref: ${schemaName}.${tableName}.${col.name} > ${col.foreignKeyRef}`);
             }
-
-            dbmlLines.push("}");
-            dbmlLines.push("");
           }
+
+          dbmlLines.push("}");
+          dbmlLines.push("");
         }
 
         if (refs.length > 0) {
