@@ -7,6 +7,7 @@ import { registerListTools } from "./tools/list.js";
 import { registerDescribeTool } from "./tools/describe.js";
 import { registerQueryTool } from "./tools/query.js";
 import { registerExecuteTool } from "./tools/execute.js";
+import { registerDeleteTool } from "./tools/delete.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -24,6 +25,7 @@ export function createServer(
   registerDescribeTool(server, config, connectionManager);
   registerQueryTool(server, config, connectionManager);
   registerExecuteTool(server, config, connectionManager);
+  registerDeleteTool(server, config, connectionManager);
 
   return server;
 }
