@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { DataDanConfig } from "./config/schema.js";
 import type { ConnectionManager } from "./db/connection.js";
+import { registerListTools } from "./tools/list.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -15,6 +16,8 @@ export function createServer(
     { name: "datadan", version: pkg.version },
     { capabilities: { tools: {} } },
   );
+
+  registerListTools(server, config, connectionManager);
 
   return server;
 }
