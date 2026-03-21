@@ -1,0 +1,30 @@
+import { createRequire } from "node:module";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { DataDanConfig } from "./config/schema.js";
+import type { ConnectionManager } from "./db/connection.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { version: string };
+
+export function createServer(
+  config: DataDanConfig,
+  connectionManager: ConnectionManager,
+): McpServer {
+  const server = new McpServer(
+    { name: "datadan", version: pkg.version },
+    { capabilities: { tools: {} } },
+  );
+
+  return server;
+}
+
+export async function startServer(server: McpServer): Promise<void> {
+  const transport = new StdioServerTransport();
+
+  transport.onerror = (error: Error) => {
+    console.error("[datadan] Transport error:", error.message);
+  };
+
+  await server.connect(transport);
+}
