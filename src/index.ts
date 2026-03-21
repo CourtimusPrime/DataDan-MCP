@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
-import { existsSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { config as loadDotenv } from "dotenv";
-import { loadConfig } from "./config/parser.js";
+import { loadConfig, writeConfig } from "./config/parser.js";
 import { resolvePermission } from "./config/resolver.js";
+import pg from "pg";
 import { ConnectionManager } from "./db/connection.js";
+import { getSchemas, getTables } from "./db/introspect.js";
 import { syncSchema } from "./db/sync.js";
 import { createServer, startServer } from "./server.js";
 import type { DataDanConfig } from "./config/schema.js";
+
+const { Pool } = pg;
 
 const CONFIG_FILENAME = "datadan.config.yaml";
 
@@ -57,8 +61,8 @@ program
 
 program
   .command("init")
-  .description("Scaffold a starter datadan.config.yaml in the current directory")
-  .action(() => {
+  .description("Scaffold datadan.config.yaml and auto-register databases found in .env")
+  .action(async () => {
     const configPath = join(process.cwd(), CONFIG_FILENAME);
 
     if (existsSync(configPath)) {
@@ -68,15 +72,112 @@ program
       process.exit(1);
     }
 
-    writeFileSync(configPath, TEMPLATE, "utf-8");
+    // Load .env from the current directory
+    const envPath = join(process.cwd(), ".env");
+    loadDotenv({ path: envPath, quiet: true });
 
-    console.log(`Created ${CONFIG_FILENAME}`);
+    // Scan .env for PostgreSQL connection strings
+    const pgEntries = scanEnvForPostgres(envPath);
+
+    if (pgEntries.length === 0) {
+      // No connection strings found — write the template as a fallback
+      writeFileSync(configPath, TEMPLATE, "utf-8");
+      registerInMcpJson(process.cwd());
+      console.log(`Created ${CONFIG_FILENAME} (template)`);
+      console.log("Registered DataDan in .mcp.json");
+      console.log();
+      console.log("No PostgreSQL connection strings found in .env.");
+      console.log("Next steps:");
+      console.log("  1. Add connection strings to your .env file (e.g. DATABASE_URL=postgresql://...)");
+      console.log("  2. Re-run: npx datadan init");
+      return;
+    }
+
+    console.log(`Found ${pgEntries.length} PostgreSQL connection string(s) in .env`);
+
+    // Validate each connection and discover schemas/tables
+    const databases: Array<{
+      name: string;
+      envVar: string;
+      connectionString: string;
+      schemas: Array<{ name: string; tables: Array<{ name: string }> }>;
+    }> = [];
+
+    for (const entry of pgEntries) {
+      const dbName = envVarToDatabaseName(entry.key);
+      console.log(`  Connecting to ${dbName} (\${${entry.key}})...`);
+
+      const pool = new Pool({ connectionString: entry.value });
+      try {
+        const client = await pool.connect();
+        try {
+          await client.query("SELECT 1");
+        } finally {
+          client.release();
+        }
+
+        // Discover schemas and tables
+        const schemaNames = await getSchemas(pool);
+        const schemas = await Promise.all(
+          schemaNames.map(async (schemaName) => {
+            const tableNames = await getTables(pool, schemaName);
+            return { name: schemaName, tables: tableNames.map((t) => ({ name: t })) };
+          }),
+        );
+
+        const totalTables = schemas.reduce((sum, s) => sum + s.tables.length, 0);
+        console.log(`    ${schemaNames.length} schema(s), ${totalTables} table(s)`);
+
+        databases.push({
+          name: dbName,
+          envVar: entry.key,
+          connectionString: entry.value,
+          schemas,
+        });
+      } catch (error) {
+        console.error(`    Failed: ${(error as Error).message}`);
+      } finally {
+        await pool.end();
+      }
+    }
+
+    if (databases.length === 0) {
+      writeFileSync(configPath, TEMPLATE, "utf-8");
+      console.log();
+      console.log(`All connections failed. Created ${CONFIG_FILENAME} (template)`);
+      return;
+    }
+
+    // Build the config
+    const config: DataDanConfig = {
+      name: basename(process.cwd()),
+      "default-permission": "read",
+      "hot-reload": true,
+      databases: databases.map((db) => ({
+        name: db.name,
+        connection_string: db.connectionString,
+        _connection_string_template: `\${${db.envVar}}`,
+        schemas: db.schemas,
+      })),
+    };
+
+    writeConfig(config, configPath);
+
+    // Register DataDan in .mcp.json
+    const mcpRegistered = registerInMcpJson(process.cwd());
+
+    console.log();
+    console.log(`Created ${CONFIG_FILENAME} with ${databases.length} database(s)`);
+    if (mcpRegistered) {
+      console.log("Registered DataDan in .mcp.json");
+    }
     console.log();
     console.log("Next steps:");
-    console.log("  1. Create a .env file with your database connection strings");
-    console.log(`  2. Edit ${CONFIG_FILENAME} to configure permissions`);
-    console.log("  3. Add DataDan to your .mcp.json");
-    console.log("  4. Run: npx datadan start");
+    console.log(`  1. Edit ${CONFIG_FILENAME} to adjust permissions (default: read)`);
+    if (!mcpRegistered) {
+      console.log("  2. Add DataDan to your .mcp.json:");
+      console.log(`     { "mcpServers": { "datadan": { "command": "npx", "args": ["datadan", "start"] } } }`);
+    }
   });
 
 program
@@ -210,6 +311,100 @@ function printPermissionSummary(config: DataDanConfig): void {
 
 function formatPermission(permission: string): string {
   return permission === "yolo" ? "⚠ yolo" : permission;
+}
+
+/**
+ * Register DataDan in .mcp.json (project-level MCP config).
+ * Creates the file if it doesn't exist. Adds the "datadan" server entry
+ * if not already present. Returns true if the entry was added or already existed.
+ */
+function registerInMcpJson(projectDir: string): boolean {
+  const mcpPath = join(projectDir, ".mcp.json");
+
+  let mcpConfig: Record<string, unknown>;
+  if (existsSync(mcpPath)) {
+    try {
+      mcpConfig = JSON.parse(readFileSync(mcpPath, "utf-8"));
+    } catch {
+      return false;
+    }
+  } else {
+    mcpConfig = {};
+  }
+
+  if (!mcpConfig.mcpServers || typeof mcpConfig.mcpServers !== "object") {
+    mcpConfig.mcpServers = {};
+  }
+
+  const servers = mcpConfig.mcpServers as Record<string, unknown>;
+
+  // Don't overwrite if already registered
+  if (servers.datadan) return true;
+
+  servers.datadan = {
+    command: "npx",
+    args: ["datadan", "start"],
+    env: {
+      DATADAN_CONFIG: `./${CONFIG_FILENAME}`,
+    },
+  };
+
+  try {
+    writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n", "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Scan a .env file for values that look like PostgreSQL connection strings.
+ * Returns an array of { key, value } pairs.
+ */
+function scanEnvForPostgres(envPath: string): Array<{ key: string; value: string }> {
+  if (!existsSync(envPath)) return [];
+
+  let contents: string;
+  try {
+    contents = readFileSync(envPath, "utf-8");
+  } catch {
+    return [];
+  }
+
+  const entries: Array<{ key: string; value: string }> = [];
+  for (const line of contents.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+
+    // Strip surrounding quotes
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    if (/^postgres(ql)?:\/\//i.test(value)) {
+      entries.push({ key, value });
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Derive a short database name from an env var name.
+ * e.g. SANDBOX_DATABASE_URL → sandbox, MY_DB_URL → my, DATABASE_URL → database
+ */
+function envVarToDatabaseName(envVar: string): string {
+  return envVar
+    .replace(/_?(DATABASE|DB|POSTGRES|PG)_?(URL|URI|STRING|DSN|CONN)?$/i, "")
+    .replace(/_+$/, "")
+    .toLowerCase()
+    .replace(/_/g, "-") || envVar.toLowerCase();
 }
 
 program.parse();
