@@ -2,7 +2,8 @@
 
 import { Command } from "commander";
 import { existsSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { config as loadDotenv } from "dotenv";
 import { loadConfig } from "./config/parser.js";
 import { resolvePermission } from "./config/resolver.js";
 import { ConnectionManager } from "./db/connection.js";
@@ -72,9 +73,10 @@ program
     console.log(`Created ${CONFIG_FILENAME}`);
     console.log();
     console.log("Next steps:");
-    console.log("  1. Set your DATABASE_URL environment variable");
+    console.log("  1. Create a .env file with your database connection strings");
     console.log(`  2. Edit ${CONFIG_FILENAME} to configure permissions`);
-    console.log("  3. Run: npx datadan start");
+    console.log("  3. Add DataDan to your .mcp.json");
+    console.log("  4. Run: npx datadan start");
   });
 
 program
@@ -87,6 +89,11 @@ program
     const configPath = resolve(
       opts.config ?? process.env.DATADAN_CONFIG ?? join(process.cwd(), CONFIG_FILENAME),
     );
+
+    // Load .env from the same directory as the config file.
+    // This populates process.env before loadConfig() interpolates ${VAR} references.
+    // dotenv never overwrites existing env vars, so shell/CI vars take precedence.
+    loadDotenv({ path: join(dirname(configPath), ".env") });
 
     let config;
     try {

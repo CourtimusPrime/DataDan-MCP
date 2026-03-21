@@ -1,4 +1,4 @@
-name: claude code session
+name: saas project name
 default-permission: read
 hot-reload: true
 databases:

@@ -3,7 +3,17 @@ import yaml from "js-yaml";
 import { DataDanConfigSchema, type DataDanConfig } from "./schema.js";
 
 export function writeConfig(config: DataDanConfig, configPath: string): void {
-  const yamlStr = yaml.dump(config, { lineWidth: -1, quotingType: '"' });
+  // Restore original ${ENV_VAR} templates before writing so we don't
+  // leak resolved secrets into the config file on disk.
+  const clone = structuredClone(config);
+  for (const db of clone.databases) {
+    const template = (db as Record<string, unknown>)._connection_string_template;
+    if (typeof template === "string") {
+      db.connection_string = template;
+    }
+    delete (db as Record<string, unknown>)._connection_string_template;
+  }
+  const yamlStr = yaml.dump(clone, { lineWidth: -1, quotingType: '"' });
   writeFileSync(configPath, yamlStr, "utf-8");
 }
 
@@ -52,9 +62,12 @@ export function loadConfig(configPath: string): DataDanConfig {
         "connection_string" in db &&
         typeof (db as Record<string, unknown>).connection_string === "string"
       ) {
-        (db as Record<string, string>).connection_string = interpolateEnvVars(
-          (db as Record<string, string>).connection_string
-        );
+        const raw = (db as Record<string, string>).connection_string;
+        // Preserve the original template so writeConfig can restore it
+        if (/\$\{\w+\}/.test(raw)) {
+          (db as Record<string, string>)._connection_string_template = raw;
+        }
+        (db as Record<string, string>).connection_string = interpolateEnvVars(raw);
       }
     }
   }
