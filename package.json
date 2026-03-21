@@ -1,0 +1,27 @@
+{
+  "name": "datadan",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "PostgreSQL MCP server that gives coding agents permission-bound access to databases via a YAML config",
+  "bin": {
+    "datadan": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "commander": "^13.1.0",
+    "js-yaml": "^4.1.0",
+    "node-sql-parser": "^5.3.8",
+    "pg": "^8.13.3",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.15.3",
+    "@types/pg": "^8.11.13",
+    "typescript": "^5.8.3"
+  }
+}
