@@ -93,7 +93,7 @@ program
     // Load .env from the same directory as the config file.
     // This populates process.env before loadConfig() interpolates ${VAR} references.
     // dotenv never overwrites existing env vars, so shell/CI vars take precedence.
-    loadDotenv({ path: join(dirname(configPath), ".env") });
+    loadDotenv({ path: join(dirname(configPath), ".env"), quiet: true });
 
     let config;
     try {
