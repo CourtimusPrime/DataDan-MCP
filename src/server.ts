@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { DataDanConfig } from "./config/schema.js";
 import type { ConnectionManager } from "./db/connection.js";
 import { registerListTools } from "./tools/list.js";
+import { registerDescribeTool } from "./tools/describe.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -18,6 +19,7 @@ export function createServer(
   );
 
   registerListTools(server, config, connectionManager);
+  registerDescribeTool(server, config, connectionManager);
 
   return server;
 }
