@@ -1,64 +1,397 @@
 {
-    "project": "MyApp",
-    "branchName": "ralph/task-priority",
-    "description": "Task Priority System - Add priority levels to tasks",
-    "userStories": [
-        {
-            "id": "US-001",
-            "title": "Add priority field to database",
-            "description": "As a developer, I need to store task priority so it persists across sessions.",
-            "acceptanceCriteria": [
-                "Add priority column to tasks table: 'high' | 'medium' | 'low' (default 'medium')",
-                "Generate and run migration successfully",
-                "Typecheck passes"
-            ],
-            "priority": 1,
-            "passes": false,
-            "notes": ""
-        },
-        {
-            "id": "US-002",
-            "title": "Display priority indicator on task cards",
-            "description": "As a user, I want to see task priority at a glance.",
-            "acceptanceCriteria": [
-                "Each task card shows colored priority badge (red=high, yellow=medium, gray=low)",
-                "Priority visible without hovering or clicking",
-                "Typecheck passes",
-                "Verify in browser using dev-browser skill"
-            ],
-            "priority": 2,
-            "passes": false,
-            "notes": ""
-        },
-        {
-            "id": "US-003",
-            "title": "Add priority selector to task edit",
-            "description": "As a user, I want to change a task's priority when editing it.",
-            "acceptanceCriteria": [
-                "Priority dropdown in task edit modal",
-                "Shows current priority as selected",
-                "Saves immediately on selection change",
-                "Typecheck passes",
-                "Verify in browser using dev-browser skill"
-            ],
-            "priority": 3,
-            "passes": false,
-            "notes": ""
-        },
-        {
-            "id": "US-004",
-            "title": "Filter tasks by priority",
-            "description": "As a user, I want to filter the task list to see only high-priority items.",
-            "acceptanceCriteria": [
-                "Filter dropdown with options: All | High | Medium | Low",
-                "Filter persists in URL params",
-                "Empty state message when no tasks match filter",
-                "Typecheck passes",
-                "Verify in browser using dev-browser skill"
-            ],
-            "priority": 4,
-            "passes": false,
-            "notes": ""
-        }
-    ]
+  "project": "DataDan",
+  "branchName": "ralph/datadan-v1",
+  "description": "DataDan - PostgreSQL MCP server that gives coding agents permission-bound access to databases via a YAML config",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffolding and dependencies",
+      "description": "As a developer, I need the project initialized with package.json, tsconfig, and all dependencies so that subsequent stories can build on a working TypeScript project.",
+      "acceptanceCriteria": [
+        "package.json exists with name 'datadan', type 'module', and bin entry pointing to dist/index.js",
+        "tsconfig.json configured for Node.js LTS (ES2022 target, NodeNext module)",
+        "Dependencies installed: @modelcontextprotocol/sdk, pg, js-yaml, zod, commander, node-sql-parser",
+        "Dev dependencies installed: typescript, @types/pg, @types/js-yaml, @types/node",
+        "Source directory structure created: src/config/, src/db/, src/permissions/, src/tools/",
+        "Empty src/index.ts entrypoint exists with a placeholder shebang (#!/usr/bin/env node)",
+        "npm run build compiles without errors",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Config types and Zod validation schemas",
+      "description": "As a developer, I need TypeScript types and Zod schemas for the datadan.config.yaml structure so that config can be validated at runtime.",
+      "acceptanceCriteria": [
+        "src/config/schema.ts exports a PermissionLevel type: 'read' | 'write' | 'delete' | 'none' | 'yolo'",
+        "Zod schema for TableConfig with fields: name (string), permission (PermissionLevel, optional)",
+        "Zod schema for SchemaConfig with fields: name (string), permission (PermissionLevel, optional), tables (TableConfig array, optional)",
+        "Zod schema for DatabaseConfig with fields: name (string), connection_string (string), permission (PermissionLevel, optional), schemas (SchemaConfig array, optional)",
+        "Zod schema for DataDanConfig with fields: name (string), default-permission (PermissionLevel), hot-reload (boolean), databases (DatabaseConfig array)",
+        "All types are exported alongside schemas (inferred via z.infer)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Config parser with YAML loading and env var interpolation",
+      "description": "As a developer, I want DataDan to load datadan.config.yaml, resolve ${ENV_VAR} references, and validate the result so that misconfigured files are caught early.",
+      "acceptanceCriteria": [
+        "src/config/parser.ts exports a loadConfig(configPath: string) function",
+        "Reads the YAML file using js-yaml",
+        "Replaces ${VAR_NAME} patterns in connection_string values with process.env values",
+        "Throws a clear error if a referenced env var is not set",
+        "Validates parsed config against the Zod schema from schema.ts",
+        "Returns the validated DataDanConfig object on success",
+        "Throws a descriptive error on validation failure (includes which field failed)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Permission resolver with cascading precedence",
+      "description": "As a developer, I want permissions to cascade from database to schema to table so that I can set broad defaults and override per-table.",
+      "acceptanceCriteria": [
+        "src/config/resolver.ts exports a resolvePermission(config, database, schema, table) function",
+        "Returns table-level permission if set",
+        "Falls back to schema-level permission if no table-level rule",
+        "Falls back to database-level permission if no schema-level rule",
+        "Falls back to config default-permission if nothing else is set",
+        "Returns exactly one PermissionLevel for any valid input",
+        "Exports a PERMISSION_HIERARCHY constant mapping each level to its allowed SQL operations",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "SQL query classifier",
+      "description": "As the system, I need to parse SQL and determine the statement type and referenced tables so that I can check permissions before execution.",
+      "acceptanceCriteria": [
+        "src/permissions/classifier.ts exports a classifyQuery(sql: string) function",
+        "Uses node-sql-parser with PostgreSQL dialect to parse the SQL",
+        "Returns an object with: statementType ('select' | 'insert' | 'update' | 'delete' | 'ddl'), requiredPermission (PermissionLevel), and referencedTables (array of {schema, table} objects)",
+        "SELECT maps to 'read', INSERT/UPDATE to 'write', DELETE to 'delete', CREATE/ALTER/DROP/TRUNCATE to 'yolo'",
+        "Multi-statement SQL returns the highest required permission",
+        "Extracts tables from JOINs, subqueries, and FROM clauses",
+        "Throws a clear error if SQL cannot be parsed",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Permission checker and blocked query error builder",
+      "description": "As the system, I need to check a classified query against resolved permissions and return structured errors when blocked.",
+      "acceptanceCriteria": [
+        "src/permissions/checker.ts exports a checkQueryPermission(config, databaseName, classifiedQuery) function",
+        "Iterates over all referenced tables in the query and resolves each table's permission",
+        "Returns { allowed: true } if all tables have sufficient permission",
+        "Returns { allowed: false, error: MCP error object } if any table lacks sufficient permission",
+        "src/permissions/errors.ts exports a buildPermissionError(tool, target, requiredLevel, currentLevel) function",
+        "Error includes the MCP isError: true shape with a text content block",
+        "Error message follows format: 'Permission denied: table '<schema>.<table>' has permission '<current>', but <action> requires '<required>'. Update datadan.config.yaml to grant '<required>' permission if needed.'",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Database connection manager",
+      "description": "As a developer, I want DataDan to manage pg Pool connections to each configured database so that tools can query them.",
+      "acceptanceCriteria": [
+        "src/db/connection.ts exports a ConnectionManager class",
+        "Constructor accepts a DataDanConfig and creates a pg.Pool for each database entry",
+        "getPool(databaseName) returns the Pool for a given database or throws if not found",
+        "connect() method tests connectivity to all pools and returns a status object with successes and failures per database",
+        "A failed connection for one database does not prevent others from connecting",
+        "disconnect() method ends all pools gracefully",
+        "Supports SSL via connection string parameters (sslmode=require)",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Schema introspection queries",
+      "description": "As the system, I need to query a live database for its schemas, tables, and column definitions so that schema sync and describe_table can work.",
+      "acceptanceCriteria": [
+        "src/db/introspect.ts exports getSchemas(pool) — returns array of schema names (excluding pg_* and information_schema)",
+        "Exports getTables(pool, schemaName) — returns array of table names in that schema",
+        "Exports getColumns(pool, schemaName, tableName) — returns array of {name, dataType, nullable, defaultValue, isPrimaryKey, isForeignKey, isUnique, foreignKeyRef}",
+        "All functions query information_schema views",
+        "Foreign key details come from information_schema.key_column_usage and referential_constraints",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "MCP server skeleton with stdio transport",
+      "description": "As the system, I need an MCP server that starts over stdio and can register tool handlers so that Claude Code can invoke DataDan tools.",
+      "acceptanceCriteria": [
+        "src/server.ts exports a createServer(config, connectionManager) function",
+        "Creates an MCP server using @modelcontextprotocol/sdk with stdio transport",
+        "Exports a startServer() function that connects the transport and begins listening",
+        "Server has name 'datadan' and version from package.json",
+        "Server handles MCP protocol errors gracefully (logs to stderr, does not crash)",
+        "Tool registration is set up but no tools registered yet (empty tool list is valid)",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "list_databases, list_schemas, and list_tables tools",
+      "description": "As an agent, I want to list accessible databases, schemas, and tables so that I can discover available data.",
+      "acceptanceCriteria": [
+        "src/tools/list.ts exports registerListTools(server, config, connectionManager) function",
+        "list_databases tool: returns names of databases where at least one target has permission >= read; excludes databases where all targets are 'none'",
+        "list_schemas tool: accepts database_name parameter; returns schema names with permission >= read; excludes 'none' schemas; returns MCP error if database not found",
+        "list_tables tool: accepts database_name and schema_name parameters; returns table names with permission >= read; excludes 'none' tables; returns MCP error if schema not found",
+        "All three tools are registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "describe_table tool",
+      "description": "As an agent, I want to see column definitions, types, and constraints for a table so that I can write correct queries.",
+      "acceptanceCriteria": [
+        "src/tools/describe.ts exports registerDescribeTool(server, config, connectionManager)",
+        "describe_table tool accepts database_name, schema_name, table_name parameters",
+        "Checks resolved permission is >= read; returns permission error if 'none'",
+        "Uses introspect.getColumns() to fetch column metadata",
+        "Returns structured result with columns: name, type, nullable, default, constraints (PK/FK/unique)",
+        "Returns MCP error if table does not exist",
+        "Tool is registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "query tool (SELECT only)",
+      "description": "As an agent, I want to run SELECT queries so that I can read data from the database.",
+      "acceptanceCriteria": [
+        "src/tools/query.ts exports registerQueryTool(server, config, connectionManager)",
+        "query tool accepts database_name and sql parameters",
+        "Uses classifier to parse the SQL — rejects non-SELECT statements with MCP error",
+        "Uses permission checker to verify read access on all referenced tables",
+        "Executes the query via pg Pool and returns rows as structured JSON content",
+        "Returns MCP error with permission explanation if blocked",
+        "Tool is registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "execute tool (INSERT/UPDATE)",
+      "description": "As an agent, I want to run INSERT and UPDATE statements so that I can modify data when permitted.",
+      "acceptanceCriteria": [
+        "src/tools/execute.ts exports registerExecuteTool(server, config, connectionManager)",
+        "execute tool accepts database_name and sql parameters",
+        "Uses classifier — rejects statements that are not INSERT or UPDATE with MCP error",
+        "Uses permission checker to verify write access on all referenced tables",
+        "Executes the statement and returns affected row count",
+        "Returns MCP error with permission explanation if blocked",
+        "Tool is registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "delete tool (DELETE only)",
+      "description": "As an agent, I want to run DELETE statements so that I can remove data when permitted.",
+      "acceptanceCriteria": [
+        "src/tools/delete.ts exports registerDeleteTool(server, config, connectionManager)",
+        "delete tool accepts database_name and sql parameters",
+        "Uses classifier — rejects statements that are not DELETE with MCP error",
+        "Uses permission checker to verify delete access on all referenced tables",
+        "Executes the statement and returns affected row count",
+        "Returns MCP error with permission explanation if blocked",
+        "Tool is registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "run_migration tool (DDL)",
+      "description": "As an agent, I want to run DDL statements so that I can modify database structure when explicitly permitted with yolo.",
+      "acceptanceCriteria": [
+        "src/tools/migration.ts exports registerMigrationTool(server, config, connectionManager)",
+        "run_migration tool accepts database_name and sql parameters",
+        "Uses classifier — only allows DDL statements (CREATE, ALTER, DROP, TRUNCATE)",
+        "Uses permission checker to verify yolo access on all referenced targets",
+        "yolo on one target does not grant access to other targets",
+        "Executes the statement and returns execution result",
+        "Returns MCP error with permission explanation if blocked",
+        "Tool is registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "dbml export tool",
+      "description": "As an agent, I want to export the database structure as a DBML file so that I can understand the full schema at a glance.",
+      "acceptanceCriteria": [
+        "src/tools/dbml.ts exports registerDbmlTool(server, config, connectionManager)",
+        "dbml tool accepts database_name parameter",
+        "Uses introspection to get all accessible schemas, tables, and columns (excludes 'none' targets)",
+        "Generates valid DBML syntax with Table blocks, column types, and relationship references",
+        "Writes the .dbml file to the project working directory",
+        "Returns the file path and a summary of exported tables",
+        "Tool is registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "register tool (runtime database registration)",
+      "description": "As an agent, I want to register a new database connection at runtime so that databases can be added without manual config editing.",
+      "acceptanceCriteria": [
+        "src/tools/register.ts exports registerRegisterTool(server, config, connectionManager, configPath)",
+        "register tool accepts database_name and connection_string parameters",
+        "Validates the connection by attempting a pg.Pool connection before persisting",
+        "Returns MCP error if connection test fails",
+        "Adds the new database to the in-memory config with default-permission applied to all discovered schemas/tables",
+        "Writes updated config back to datadan.config.yaml using js-yaml",
+        "Adds the new pool to the ConnectionManager",
+        "Returns success confirmation with list of discovered schemas",
+        "Tool is registered on the MCP server in server.ts",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Schema sync on startup",
+      "description": "As a developer, I want DataDan to reconcile my config against the live database so that new tables are auto-added and stale entries are dropped.",
+      "acceptanceCriteria": [
+        "src/db/sync.ts exports a syncSchema(config, connectionManager, configPath) function",
+        "Queries each connected database for current schemas and tables via introspection",
+        "Tables/schemas in config that no longer exist in the DB are removed from the config object",
+        "New tables/schemas found in the DB are added with the applicable default permission (schema-level default, then top-level default-permission)",
+        "Existing config entries with explicit permissions are never altered",
+        "Writes the reconciled config back to datadan.config.yaml using js-yaml dump",
+        "Returns a summary of changes (added, removed counts)",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Hot-reload middleware",
+      "description": "As a developer, I want DataDan to re-read the config before each tool invocation when hot-reload is enabled so I can change permissions mid-session.",
+      "acceptanceCriteria": [
+        "src/server.ts wraps each tool handler with hot-reload logic",
+        "When config hot-reload is true, re-reads and re-parses datadan.config.yaml before each tool invocation",
+        "Re-runs schema sync on reload to pick up DB changes",
+        "When hot-reload is false, uses the config loaded at startup (no re-read)",
+        "If reload produces an invalid config, logs warning to stderr and continues with last valid config",
+        "The reloaded config is passed into the tool handler so it always uses current permissions",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "CLI — datadan init",
+      "description": "As a developer, I want to scaffold a starter datadan.config.yaml so I can get started quickly.",
+      "acceptanceCriteria": [
+        "src/index.ts uses commander to register an 'init' subcommand",
+        "Running 'npx datadan init' creates datadan.config.yaml in the current working directory",
+        "Scaffolded config has placeholder values: name, default-permission (read), hot-reload (true), one example database entry with ${DATABASE_URL}",
+        "Includes YAML comments explaining each field",
+        "Warns and exits without overwriting if datadan.config.yaml already exists",
+        "Prints success message with next steps",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "CLI — datadan start",
+      "description": "As a developer, I want to start the MCP server from the command line so it can handle agent requests.",
+      "acceptanceCriteria": [
+        "src/index.ts registers a 'start' subcommand via commander",
+        "Accepts --config <path> flag to specify config file location",
+        "Falls back to DATADAN_CONFIG env var, then ./datadan.config.yaml",
+        "Loads config via parser, creates ConnectionManager, connects to all databases",
+        "Runs schema sync before accepting requests",
+        "Creates and starts the MCP server",
+        "Exits with clear error message if no valid config is found",
+        "Exits with clear error message if all database connections fail",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "CLI — dry-run mode",
+      "description": "As a developer, I want a preview mode that shows resolved permissions without starting the server so I can validate my config.",
+      "acceptanceCriteria": [
+        "'start' subcommand accepts a --dry-run flag",
+        "When --dry-run is set, connects to databases and runs schema sync but does not start the MCP server",
+        "Outputs a formatted summary table to stdout: database | schema | table | resolved permission",
+        "Highlights any 'yolo' permissions with a warning prefix (e.g., '⚠ yolo')",
+        "Exits with code 0 after printing the summary",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    }
+  ]
 }
