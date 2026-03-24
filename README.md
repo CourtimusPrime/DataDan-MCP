@@ -8,4 +8,4 @@
 
 DataDan is a permissioned MCP server that connects Claude Code to multiple PostgreSQL databases.
 
-Instead of giving Claude total access with a connection string, configure read/write/delete/yolo permissions to your databases, schemas, and tables.
+Instead of giving Claude total access to your database with a connection string (which is super risky), configure read/write/delete/yolo permissions to your databases, schemas, and tables.
