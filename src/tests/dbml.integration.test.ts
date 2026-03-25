@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { registerDbmlTool } from "../tools/dbml.js";
 
-// Mock introspect
+// Mock introspect — only getColumns is still called by the handler
 vi.mock("../db/introspect.js", () => ({
   getSchemas: vi.fn(),
   getTables: vi.fn(),
@@ -13,10 +13,8 @@ vi.mock("node:fs", () => ({
   writeFileSync: vi.fn(),
 }));
 
-import { getSchemas, getTables, getColumns } from "../db/introspect.js";
+import { getColumns } from "../db/introspect.js";
 
-const mockedGetSchemas = vi.mocked(getSchemas);
-const mockedGetTables = vi.mocked(getTables);
 const mockedGetColumns = vi.mocked(getColumns);
 
 function captureHandler(config: any, mockConnMgr: any) {
@@ -32,15 +30,23 @@ const baseConfig = {
   name: "test",
   "default-permission": "read" as const,
   "hot-reload": false,
-  databases: [{ name: "db1", connection_string: "pg://", permission: "read" as const }],
+  databases: [{
+    name: "db1",
+    connection_string: "pg://",
+    permission: "read" as const,
+    schemas: [
+      {
+        name: "public",
+        tables: [{ name: "users" }],
+      },
+    ],
+  }],
 };
 
 describe("registerDbmlTool", () => {
   it("exports DBML for accessible tables", async () => {
     const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
 
-    mockedGetSchemas.mockResolvedValue(["public"]);
-    mockedGetTables.mockResolvedValue(["users"]);
     mockedGetColumns.mockResolvedValue([
       { name: "id", dataType: "integer", nullable: false, defaultValue: null, isPrimaryKey: true, isForeignKey: false, isUnique: false, foreignKeyRef: null },
       { name: "name", dataType: "text", nullable: true, defaultValue: null, isPrimaryKey: false, isForeignKey: false, isUnique: false, foreignKeyRef: null },
@@ -54,16 +60,24 @@ describe("registerDbmlTool", () => {
   });
 
   it("includes foreign key references", async () => {
+    const configWithOrders = {
+      ...baseConfig,
+      databases: [{
+        ...baseConfig.databases[0],
+        schemas: [{
+          name: "public",
+          tables: [{ name: "orders" }],
+        }],
+      }],
+    };
     const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
 
-    mockedGetSchemas.mockResolvedValue(["public"]);
-    mockedGetTables.mockResolvedValue(["orders"]);
     mockedGetColumns.mockResolvedValue([
       { name: "id", dataType: "integer", nullable: false, defaultValue: null, isPrimaryKey: true, isForeignKey: false, isUnique: false, foreignKeyRef: null },
       { name: "user_id", dataType: "integer", nullable: false, defaultValue: null, isPrimaryKey: false, isForeignKey: true, isUnique: false, foreignKeyRef: "public.users.id" },
     ]);
 
-    const handler = captureHandler(baseConfig, mockConnMgr);
+    const handler = captureHandler(configWithOrders, mockConnMgr);
     const result = await handler({ database_name: "db1" });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.referencesExported).toBe(1);
@@ -77,7 +91,7 @@ describe("registerDbmlTool", () => {
 
   it("handles introspection errors", async () => {
     const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetSchemas.mockRejectedValue(new Error("timeout"));
+    mockedGetColumns.mockRejectedValue(new Error("timeout"));
 
     const handler = captureHandler(baseConfig, mockConnMgr);
     const result = await handler({ database_name: "db1" });
@@ -88,8 +102,6 @@ describe("registerDbmlTool", () => {
   it("skips tables with no columns", async () => {
     const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
 
-    mockedGetSchemas.mockResolvedValue(["public"]);
-    mockedGetTables.mockResolvedValue(["empty_table"]);
     mockedGetColumns.mockResolvedValue([]);
 
     const handler = captureHandler(baseConfig, mockConnMgr);

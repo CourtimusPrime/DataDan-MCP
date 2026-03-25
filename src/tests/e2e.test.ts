@@ -40,17 +40,13 @@ const CONFIG_PATH = join(EXAMPLE_DIR, "datadan.config.yaml");
 let config: DataDanConfig;
 let connectionManager: ConnectionManager;
 
+// Check prerequisites once — skip the entire suite if not available
+loadEnv({ path: ENV_PATH });
+const CAN_RUN = existsSync(ENV_PATH) && existsSync(CONFIG_PATH) && !!process.env.DATABASE_URL;
+
 // ─── Lifecycle ──────────────────────────────────────────────────────
 beforeAll(async () => {
-  // Verify example/ setup exists (no temp files created)
-  if (!existsSync(ENV_PATH)) throw new Error("Missing example/.env");
-  if (!existsSync(CONFIG_PATH)) throw new Error("Missing example/datadan.config.yaml");
-
-  // Load env vars from the real .env file
-  loadEnv({ path: ENV_PATH });
-  if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL not set in example/.env");
-  }
+  if (!CAN_RUN) return;
 
   // Load the project's config exactly like `datadan start` does
   config = loadConfig(CONFIG_PATH);
@@ -77,7 +73,7 @@ afterAll(async () => {
 // ═══════════════════════════════════════════════════════════════════
 // 1. STARTUP — config load + connection + schema sync
 // ═══════════════════════════════════════════════════════════════════
-describe("Startup: Config & Connection", () => {
+describe.skipIf(!CAN_RUN)("Startup: Config & Connection", () => {
   it("loads the example config with correct structure", () => {
     expect(config.name).toBe("nczdev-workspace");
     expect(config["default-permission"]).toBe("read");
@@ -117,7 +113,7 @@ describe("Startup: Config & Connection", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 2. TOOL: list_databases
 // ═══════════════════════════════════════════════════════════════════
-describe("Tool: list_databases", () => {
+describe.skipIf(!CAN_RUN)("Tool: list_databases", () => {
   it("lists nczdev as the only accessible database", () => {
     // Replicate what the list_databases handler does
     const accessibleDbs = config.databases
@@ -134,7 +130,7 @@ describe("Tool: list_databases", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 3. TOOL: list_schemas
 // ═══════════════════════════════════════════════════════════════════
-describe("Tool: list_schemas", () => {
+describe.skipIf(!CAN_RUN)("Tool: list_schemas", () => {
   it("returns real schemas from the live database", async () => {
     const pool = connectionManager.getPool("nczdev");
     const schemas = await getSchemas(pool);
@@ -158,7 +154,7 @@ describe("Tool: list_schemas", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 4. TOOL: list_tables
 // ═══════════════════════════════════════════════════════════════════
-describe("Tool: list_tables", () => {
+describe.skipIf(!CAN_RUN)("Tool: list_tables", () => {
   it("returns tables from the auth schema", async () => {
     const pool = connectionManager.getPool("nczdev");
     const tables = await getTables(pool, "auth");
@@ -187,7 +183,7 @@ describe("Tool: list_tables", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 5. TOOL: describe_table
 // ═══════════════════════════════════════════════════════════════════
-describe("Tool: describe_table", () => {
+describe.skipIf(!CAN_RUN)("Tool: describe_table", () => {
   it("describes auth.users with column metadata", async () => {
     const pool = connectionManager.getPool("nczdev");
     const columns = await getColumns(pool, "auth", "users");
@@ -230,7 +226,7 @@ describe("Tool: describe_table", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 6. TOOL: query (SELECT only)
 // ═══════════════════════════════════════════════════════════════════
-describe("Tool: query", () => {
+describe.skipIf(!CAN_RUN)("Tool: query", () => {
   it("SELECT COUNT(*) FROM auth.users", async () => {
     const result = await executeSqlTool(
       config, connectionManager, "nczdev",
@@ -295,7 +291,7 @@ describe("Tool: query", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 7. Permission Guard — write/delete/DDL denied
 // ═══════════════════════════════════════════════════════════════════
-describe("Permission Guard: read-only enforcement", () => {
+describe.skipIf(!CAN_RUN)("Permission Guard: read-only enforcement", () => {
   it("classifyAndAuthorize allows SELECT", () => {
     const result = classifyAndAuthorize(
       config, "nczdev", "SELECT * FROM auth.users", ["select"], "query"
@@ -347,7 +343,7 @@ describe("Permission Guard: read-only enforcement", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 8. Error Handling
 // ═══════════════════════════════════════════════════════════════════
-describe("Error Handling", () => {
+describe.skipIf(!CAN_RUN)("Error Handling", () => {
   it("returns error for invalid SQL", async () => {
     const result = await executeSqlTool(
       config, connectionManager, "nczdev",
@@ -387,7 +383,7 @@ describe("Error Handling", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 9. SQL Classification
 // ═══════════════════════════════════════════════════════════════════
-describe("SQL Classification", () => {
+describe.skipIf(!CAN_RUN)("SQL Classification", () => {
   it("classifies schema-qualified SELECT", () => {
     const result = classifyQuery("SELECT * FROM auth.users");
     expect(result.statementType).toBe("select");
@@ -425,7 +421,7 @@ describe("SQL Classification", () => {
 // ═══════════════════════════════════════════════════════════════════
 // 10. Cross-schema discovery
 // ═══════════════════════════════════════════════════════════════════
-describe("Cross-schema Discovery", () => {
+describe.skipIf(!CAN_RUN)("Cross-schema Discovery", () => {
   it("can introspect columns from multiple schemas", async () => {
     const pool = connectionManager.getPool("nczdev");
 

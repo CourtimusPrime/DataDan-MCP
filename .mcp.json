@@ -1,5 +1,12 @@
 {
   "mcpServers": {
+    "datadan": {
+      "command": "npx",
+      "args": [
+        "datadan",
+        "start"
+      ]
+    },
     "forge_extension": {
       "url": "http://localhost:63088/mcp"
     }

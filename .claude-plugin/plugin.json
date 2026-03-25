@@ -1,0 +1,15 @@
+{
+  "name": "datadan",
+  "version": "0.1.0",
+  "description": "PostgreSQL MCP server that gives coding agents permission-bound database access via YAML config",
+  "author": {
+    "name": "CourtimusPrime"
+  },
+  "keywords": [
+    "postgresql",
+    "database",
+    "permissions",
+    "mcp",
+    "sql"
+  ]
+}

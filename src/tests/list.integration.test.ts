@@ -1,16 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { registerListTools } from "../tools/list.js";
 
-// Mock introspect
-vi.mock("../db/introspect.js", () => ({
-  getSchemas: vi.fn(),
-  getTables: vi.fn(),
-}));
-
-import { getSchemas, getTables } from "../db/introspect.js";
-const mockedGetSchemas = vi.mocked(getSchemas);
-const mockedGetTables = vi.mocked(getTables);
-
 function captureHandlers(config: any, mockConnMgr: any) {
   const handlers: Record<string, any> = {};
   const mockServer = {
@@ -24,7 +14,21 @@ const baseConfig = {
   name: "test",
   "default-permission": "read" as const,
   "hot-reload": false,
-  databases: [{ name: "db1", connection_string: "pg://", permission: "read" as const }],
+  databases: [{
+    name: "db1",
+    connection_string: "pg://",
+    permission: "read" as const,
+    schemas: [
+      {
+        name: "public",
+        tables: [{ name: "users" }, { name: "orders" }],
+      },
+      {
+        name: "internal",
+        tables: [{ name: "logs" }],
+      },
+    ],
+  }],
 };
 
 describe("list_databases", () => {
@@ -53,10 +57,7 @@ describe("list_databases", () => {
 
 describe("list_schemas", () => {
   it("lists accessible schemas", async () => {
-    const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetSchemas.mockResolvedValue(["public", "internal"]);
-
-    const handlers = captureHandlers(baseConfig, mockConnMgr);
+    const handlers = captureHandlers(baseConfig, {} as any);
     const result = await handlers.list_schemas({ database_name: "db1" });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.schemas).toEqual(["public", "internal"]);
@@ -83,41 +84,34 @@ describe("list_schemas", () => {
       }],
     };
 
-    const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetSchemas.mockResolvedValue(["public", "secret"]);
-
-    const handlers = captureHandlers(config, mockConnMgr);
+    const handlers = captureHandlers(config, {} as any);
     const result = await handlers.list_schemas({ database_name: "db1" });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.schemas).toEqual(["public"]);
   });
 
-  it("handles introspection error", async () => {
-    const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetSchemas.mockRejectedValue(new Error("fail"));
-
-    const handlers = captureHandlers(baseConfig, mockConnMgr);
+  it("returns empty schemas when database has no schemas in config", async () => {
+    const config = {
+      ...baseConfig,
+      databases: [{ name: "db1", connection_string: "pg://", permission: "read" as const }],
+    };
+    const handlers = captureHandlers(config, {} as any);
     const result = await handlers.list_schemas({ database_name: "db1" });
-    expect(result.isError).toBe(true);
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.schemas).toEqual([]);
   });
 });
 
 describe("list_tables", () => {
   it("lists accessible tables", async () => {
-    const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetTables.mockResolvedValue(["users", "orders"]);
-
-    const handlers = captureHandlers(baseConfig, mockConnMgr);
+    const handlers = captureHandlers(baseConfig, {} as any);
     const result = await handlers.list_tables({ database_name: "db1", schema_name: "public" });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.tables).toEqual(["users", "orders"]);
   });
 
-  it("returns error when schema has no tables", async () => {
-    const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetTables.mockResolvedValue([]);
-
-    const handlers = captureHandlers(baseConfig, mockConnMgr);
+  it("returns error when schema not found in config", async () => {
+    const handlers = captureHandlers(baseConfig, {} as any);
     const result = await handlers.list_tables({ database_name: "db1", schema_name: "empty" });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("not found");
@@ -142,10 +136,7 @@ describe("list_tables", () => {
       }],
     };
 
-    const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetTables.mockResolvedValue(["users", "secrets"]);
-
-    const handlers = captureHandlers(config, mockConnMgr);
+    const handlers = captureHandlers(config, {} as any);
     const result = await handlers.list_tables({ database_name: "db1", schema_name: "public" });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.tables).toEqual(["users"]);
@@ -154,15 +145,6 @@ describe("list_tables", () => {
   it("returns error for unknown database", async () => {
     const handlers = captureHandlers(baseConfig, {} as any);
     const result = await handlers.list_tables({ database_name: "missing", schema_name: "public" });
-    expect(result.isError).toBe(true);
-  });
-
-  it("handles introspection error", async () => {
-    const mockConnMgr = { getPool: vi.fn().mockReturnValue({}) } as any;
-    mockedGetTables.mockRejectedValue(new Error("fail"));
-
-    const handlers = captureHandlers(baseConfig, mockConnMgr);
-    const result = await handlers.list_tables({ database_name: "db1", schema_name: "public" });
     expect(result.isError).toBe(true);
   });
 });
