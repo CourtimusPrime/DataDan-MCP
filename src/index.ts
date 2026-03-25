@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { config as loadDotenv } from "dotenv";
@@ -82,9 +83,13 @@ program
     if (pgEntries.length === 0) {
       // No connection strings found — write the template as a fallback
       writeFileSync(configPath, TEMPLATE, "utf-8");
-      registerInMcpJson(process.cwd());
+      const mcpResult = registerMcpServer(process.cwd());
       console.log(`Created ${CONFIG_FILENAME} (template)`);
-      console.log("Registered DataDan in .mcp.json");
+      if (mcpResult.method === "claude-cli") {
+        console.log("Registered DataDan as MCP server (via Claude Code CLI)");
+      } else if (mcpResult.method === "mcp-json") {
+        console.log("Registered DataDan in .mcp.json");
+      }
       console.log();
       console.log("No PostgreSQL connection strings found in .env.");
       console.log("Next steps:");
@@ -163,20 +168,22 @@ program
 
     writeConfig(config, configPath);
 
-    // Register DataDan in .mcp.json
-    const mcpRegistered = registerInMcpJson(process.cwd());
+    // Register DataDan as MCP server
+    const mcpResult = registerMcpServer(process.cwd());
 
     console.log();
     console.log(`Created ${CONFIG_FILENAME} with ${databases.length} database(s)`);
-    if (mcpRegistered) {
+    if (mcpResult.method === "claude-cli") {
+      console.log("Registered DataDan as MCP server (via Claude Code CLI)");
+    } else if (mcpResult.method === "mcp-json") {
       console.log("Registered DataDan in .mcp.json");
     }
     console.log();
     console.log("Next steps:");
     console.log(`  1. Edit ${CONFIG_FILENAME} to adjust permissions (default: read)`);
-    if (!mcpRegistered) {
-      console.log("  2. Add DataDan to your .mcp.json:");
-      console.log(`     { "mcpServers": { "datadan": { "command": "npx", "args": ["datadan", "start"] } } }`);
+    if (!mcpResult.registered) {
+      console.log("  2. Register DataDan as an MCP server:");
+      console.log(`     claude mcp add -e DATADAN_CONFIG=./datadan.config.yaml datadan -- npx datadan start`);
     }
   });
 
@@ -311,6 +318,38 @@ function printPermissionSummary(config: DataDanConfig): void {
 
 function formatPermission(permission: string): string {
   return permission === "yolo" ? "⚠ yolo" : permission;
+}
+
+/**
+ * Attempt to register DataDan via `claude mcp add` CLI command.
+ * Returns true on success, false on any failure (command not found, non-zero exit, timeout).
+ */
+function registerWithClaudeCli(): boolean {
+  try {
+    execSync(
+      "claude mcp add -e DATADAN_CONFIG=./datadan.config.yaml datadan -- npx datadan start",
+      { stdio: "pipe", timeout: 10_000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Register DataDan as an MCP server.
+ * Tries `claude mcp add` first; falls back to writing .mcp.json.
+ */
+function registerMcpServer(projectDir: string): { registered: boolean; method: "claude-cli" | "mcp-json" | "none" } {
+  if (registerWithClaudeCli()) {
+    return { registered: true, method: "claude-cli" };
+  }
+
+  if (registerInMcpJson(projectDir)) {
+    return { registered: true, method: "mcp-json" };
+  }
+
+  return { registered: false, method: "none" };
 }
 
 /**
