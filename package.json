@@ -8,6 +8,7 @@
   },
   "files": [
     "dist",
+    "!dist/tests",
     "README.md"
   ],
   "scripts": {
