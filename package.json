@@ -6,7 +6,12 @@
   "bin": {
     "datadan": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
+    "prepublishOnly": "tsc",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
