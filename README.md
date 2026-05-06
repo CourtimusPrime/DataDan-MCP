@@ -1,38 +1,38 @@
 # DataDan
 
-PostgreSQL MCP server that gives Claude Code permission-bound database access via a YAML config.
+A minimalist PostgreSQL MCP that gives Claude Code permission-bound access to your database.
 
-Point it at your databases, set permissions per schema or table, and Claude can browse structure, query data, run migrations — all within the boundaries you define.
-
-## Install
-
-```bash
-npm install -g datadan
-```
-
-Or use directly with `npx` (no install needed).
+- **Problem**: AI agents are notorious for accidentally deleting databases because there is nothing declarative to prevent sessions from over-stepping or acting impulsively.
+- **Solution**: DataDan lets you grant scoped permissions to your database, schemas, and tables.
 
 ## Quick Start
 
-In any project directory with a `.env` containing PostgreSQL connection strings:
+Add a `.env` with a PostgreSQL connection string to your project, then add DataDan to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "datadan": {
+      "command": "npx",
+      "args": ["-y", "datadan", "start"]
+    }
+  }
+}
+```
+
+That's it. On first run, DataDan auto-discovers your databases, creates `datadan.config.yaml` with read-only access, and starts the MCP server — all in one pass. Restart Claude Code and it has read access to your databases.
+
+## Use in Any Project
+
+### Option A: Per-project (default)
+
+Add the `.mcp.json` entry above to each project directory. On first `start`, DataDan scans `.env`, creates `datadan.config.yaml`, and registers itself.
+
+To re-initialize manually:
 
 ```bash
 npx datadan init
 ```
-
-This will:
-1. Scan your `.env` for `postgres://` connection strings
-2. Connect and discover all schemas and tables
-3. Create `datadan.config.yaml` with everything locked to `read`
-4. Register DataDan in `.mcp.json` so Claude Code picks it up automatically
-
-That's it. Restart Claude Code and it has read access to your databases.
-
-## Use in Any Project
-
-### Option A: Init per project
-
-Run `npx datadan init` in each project directory. This creates a local config and `.mcp.json` entry.
 
 ### Option B: Global config, point from anywhere
 
@@ -63,7 +63,7 @@ Then in any project's `.mcp.json`:
 }
 ```
 
-Or set the env var `DATADAN_CONFIG` to point to your config.
+Or set `DATADAN_CONFIG` env var to point to your config.
 
 ### Option C: User-level MCP config
 
@@ -154,6 +154,62 @@ npx datadan start --dry-run
  main     | public | posts    | write
  main     | public | secrets  | none
 ```
+
+## Security
+
+DataDan enforces permissions at the application layer — it parses every SQL statement, resolves table-level permissions from your config, and blocks statements that exceed the granted level. It also writes a `CLAUDE.md` instruction telling Claude Code to never connect to PostgreSQL directly.
+
+**This is not sufficient on its own.** Claude Code has a Bash tool and can read your `.env`. A determined or mistaken model can bypass DataDan entirely by running `psql $DATABASE_URL` or writing a script that connects directly.
+
+### Use a restricted PostgreSQL user
+
+The only enforcement that cannot be bypassed is PostgreSQL-level permissions. Your `DATABASE_URL` should point to a user with grants that match your DataDan config:
+
+```sql
+-- For read-only access
+CREATE USER datadan_readonly WITH PASSWORD 'yourpassword';
+GRANT CONNECT ON DATABASE yourdb TO datadan_readonly;
+GRANT USAGE ON SCHEMA public TO datadan_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO datadan_readonly;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO datadan_readonly;
+```
+
+If DataDan's config is `read`, the DB user should only have `SELECT`. Even if a model bypasses DataDan and connects directly, it hits the same wall.
+
+### Keep the config outside the project directory
+
+With `hot-reload: true`, DataDan re-reads `datadan.config.yaml` before each tool call. If the file is writable by Claude Code, a model could escalate its own permissions mid-session.
+
+Move the config file outside the project and point to it via `DATADAN_CONFIG`:
+
+```bash
+# In your shell or CI env
+export DATADAN_CONFIG=/etc/datadan/myproject.yaml
+```
+
+Or use `--config` in your `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "datadan": {
+      "command": "npx",
+      "args": ["datadan", "start", "--config", "/home/you/datadan.config.yaml"]
+    }
+  }
+}
+```
+
+### Defense in depth
+
+| Layer | What it stops |
+|-------|--------------|
+| Restricted DB user | Direct bypass via Bash/psql/scripts |
+| DataDan permission gates | Accidental over-reach through MCP tools |
+| Config outside project dir | Mid-session self-escalation via hot-reload |
+| `CLAUDE.md` instruction | Well-behaved models using wrong access path |
+
+DataDan is most effective as the right-path guardrail on top of a least-privilege DB user — not as a standalone security boundary.
 
 ## Schema Sync
 

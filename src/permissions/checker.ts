@@ -19,9 +19,12 @@ export function checkQueryPermission(
 ): CheckResult {
   const { requiredPermission, referencedTables } = classifiedQuery;
 
-  // Safety check: if we couldn't identify any tables and the operation is
-  // mutating, deny by default rather than silently allowing.
-  if (referencedTables.length === 0 && requiredPermission !== "read") {
+  if (referencedTables.length === 0) {
+    // Genuinely tableless reads (SELECT 1, SELECT NOW()) are safe — allow.
+    if (classifiedQuery.explicitlyTableless && requiredPermission === "read") {
+      return { allowed: true };
+    }
+    // Parser failed to identify tables — can't make a permission decision, deny.
     return {
       allowed: false,
       error: {
@@ -29,7 +32,7 @@ export function checkQueryPermission(
         content: [
           {
             type: "text",
-            text: "Could not determine target tables for this statement. Permission denied for safety.",
+            text: "Could not determine target tables for this statement. Permission denied for safety. Use fully-qualified table names (schema.table).",
           },
         ],
       },

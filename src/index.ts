@@ -2,7 +2,7 @@
 
 import { Command } from "commander";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { loadConfig, writeConfig } from "./config/parser.js";
@@ -83,18 +83,16 @@ async function runInit(): Promise<boolean> {
   const pgEntries = scanEnvForPostgres(envPath);
 
   if (pgEntries.length === 0) {
-    // No connection strings found — write the template as a fallback
     writeFileSync(configPath, TEMPLATE, "utf-8");
     const mcpResult = registerMcpServer(process.cwd());
-    const agentFile = registerAgentInstruction(process.cwd());
+    writeAgentInstruction(null, process.cwd());
+    writeBashDenyRules(process.cwd());
+    registerSessionStartHook(process.cwd());
     console.log(`Created ${CONFIG_FILENAME} (template)`);
     if (mcpResult.method === "claude-cli") {
       console.log("Registered DataDan as MCP server (via Claude Code CLI)");
     } else if (mcpResult.method === "mcp-json") {
       console.log("Registered DataDan in .mcp.json");
-    }
-    if (agentFile) {
-      console.log(`Added DataDan instruction to ${agentFile}`);
     }
     console.log();
     console.log("No PostgreSQL connection strings found in .env.");
@@ -174,9 +172,10 @@ async function runInit(): Promise<boolean> {
 
   writeConfig(config, configPath);
 
-  // Register DataDan as MCP server
   const mcpResult = registerMcpServer(process.cwd());
-  const agentFile = registerAgentInstruction(process.cwd());
+  const agentFile = writeAgentInstruction(config, process.cwd());
+  writeBashDenyRules(process.cwd());
+  registerSessionStartHook(process.cwd());
 
   console.log();
   console.log(`Created ${CONFIG_FILENAME} with ${databases.length} database(s)`);
@@ -188,6 +187,8 @@ async function runInit(): Promise<boolean> {
   if (agentFile) {
     console.log(`Added DataDan instruction to ${agentFile}`);
   }
+  console.log("Added bash deny rules to .claude/settings.local.json");
+  console.log("Registered SessionStart hook to keep deny rules in sync");
   console.log();
   console.log("Next steps:");
   console.log(`  1. Edit ${CONFIG_FILENAME} to adjust permissions (default: read)`);
@@ -211,6 +212,17 @@ async function runStart(opts: { config?: string; dryRun?: boolean }): Promise<vo
   const configPath = resolve(
     opts.config ?? process.env.DATADAN_CONFIG ?? join(process.cwd(), CONFIG_FILENAME),
   );
+
+  // Auto-init if no config exists and no explicit --config path was given
+  if (!opts.config && !process.env.DATADAN_CONFIG && !existsSync(configPath)) {
+    console.error("[datadan] No config found — running init...");
+    const configured = await runInit();
+    if (!configured) {
+      console.error("[datadan] Init produced no databases. Add connection strings to .env and restart.");
+      process.exit(1);
+    }
+    console.error("");
+  }
 
   // Load .env from the same directory as the config file.
   // This populates process.env before loadConfig() interpolates ${VAR} references.
@@ -341,19 +353,59 @@ function formatPermission(permission: string): string {
   return permission === "yolo" ? "⚠ yolo" : permission;
 }
 
-const AGENT_INSTRUCTION = "- Use the DataDan MCP tools (prefixed with `datadan_`) to read and write to PostgreSQL databases. Run `npx datadan config` to see available permission levels.";
+const DATADAN_SECTION_START = "<!-- datadan:start -->";
+const DATADAN_SECTION_END = "<!-- datadan:end -->";
 
-/**
- * Add a DataDan instruction to AGENTS.md or CLAUDE.md so coding agents
- * know to use DataDan for database operations.
- * Returns the filename written to, or null if skipped/failed.
- */
-function registerAgentInstruction(projectDir: string): string | null {
+const BASH_DENY_RULES = [
+  "Bash(psql)",
+  "Bash(psql *)",
+  "Bash(pg_dump)",
+  "Bash(pg_dump *)",
+  "Bash(pg_restore *)",
+  "Bash(pg_dumpall *)",
+  "Bash(pgcli *)",
+  "Bash(pg_isready *)",
+];
+
+function buildAgentInstruction(config: DataDanConfig | null): string {
+  const lines: string[] = [];
+  lines.push("## DataDan: Database Access Rules");
+  lines.push("");
+  lines.push("All PostgreSQL access MUST go through DataDan MCP tools (prefixed `datadan_`).");
+  lines.push("");
+  lines.push("**Never** connect to PostgreSQL directly via `psql`, `pg` library, raw connection strings, or any other method. Direct connections bypass permission gates and are a safety violation.");
+  lines.push("");
+  lines.push("**Never** modify `datadan.config.yaml` to escalate permissions. Permission changes must be made by the user.");
+
+  if (config && config.databases.length > 0) {
+    lines.push("");
+    lines.push("### Accessible Databases");
+    for (const db of config.databases) {
+      lines.push("");
+      const dbPerm = db.permission ?? config["default-permission"];
+      lines.push(`#### ${db.name} (default: ${dbPerm})`);
+      const visibleSchemas = (db.schemas ?? []).filter(
+        (s) => (s.permission ?? dbPerm) !== "none",
+      );
+      if (visibleSchemas.length > 0) {
+        lines.push("");
+        lines.push("| Schema | Permission |");
+        lines.push("|--------|-----------|");
+        for (const schema of visibleSchemas) {
+          lines.push(`| ${schema.name} | ${schema.permission ?? dbPerm} |`);
+        }
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function writeAgentInstruction(config: DataDanConfig | null, projectDir: string): string | null {
   const candidates = ["AGENTS.md", "CLAUDE.md"];
   let targetFile: string | null = null;
   let targetPath: string | null = null;
 
-  // Find existing AGENTS.md or CLAUDE.md
   for (const name of candidates) {
     const p = join(projectDir, name);
     if (existsSync(p)) {
@@ -363,7 +415,6 @@ function registerAgentInstruction(projectDir: string): string | null {
     }
   }
 
-  // If neither exists, create CLAUDE.md
   if (!targetPath) {
     targetFile = "CLAUDE.md";
     targetPath = join(projectDir, "CLAUDE.md");
@@ -375,18 +426,114 @@ function registerAgentInstruction(projectDir: string): string | null {
       content = readFileSync(targetPath, "utf-8");
     }
 
-    // Idempotent: skip if already present
-    if (content.includes("DataDan MCP")) {
-      return null;
+    const newSection = `${DATADAN_SECTION_START}\n${buildAgentInstruction(config)}\n${DATADAN_SECTION_END}`;
+    const startIdx = content.indexOf(DATADAN_SECTION_START);
+    const endIdx = content.indexOf(DATADAN_SECTION_END);
+
+    let newContent: string;
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      newContent =
+        content.slice(0, startIdx) +
+        newSection +
+        content.slice(endIdx + DATADAN_SECTION_END.length);
+    } else {
+      const separator =
+        content.length > 0 && !content.endsWith("\n\n")
+          ? content.endsWith("\n")
+            ? "\n"
+            : "\n\n"
+          : "";
+      newContent = content + separator + newSection + "\n";
     }
 
-    const separator = content.length > 0 && !content.endsWith("\n\n")
-      ? (content.endsWith("\n") ? "\n" : "\n\n")
-      : "";
-    writeFileSync(targetPath, content + separator + AGENT_INSTRUCTION + "\n", "utf-8");
+    writeFileSync(targetPath, newContent, "utf-8");
     return targetFile;
   } catch {
     return null;
+  }
+}
+
+function writeBashDenyRules(projectDir: string): boolean {
+  const clauDir = join(projectDir, ".claude");
+  const settingsPath = join(clauDir, "settings.local.json");
+
+  let settings: Record<string, unknown> = {};
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    } catch {
+      return false;
+    }
+  }
+
+  if (!settings.permissions || typeof settings.permissions !== "object") {
+    settings.permissions = {};
+  }
+  const perms = settings.permissions as Record<string, unknown>;
+  if (!Array.isArray(perms.deny)) {
+    perms.deny = [];
+  }
+  const deny = perms.deny as string[];
+
+  let changed = false;
+  for (const rule of BASH_DENY_RULES) {
+    if (!deny.includes(rule)) {
+      deny.push(rule);
+      changed = true;
+    }
+  }
+
+  if (!changed) return true;
+
+  try {
+    mkdirSync(clauDir, { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function registerSessionStartHook(projectDir: string): boolean {
+  const clauDir = join(projectDir, ".claude");
+  const settingsPath = join(clauDir, "settings.local.json");
+
+  let settings: Record<string, unknown> = {};
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    } catch {
+      return false;
+    }
+  }
+
+  if (!settings.hooks || typeof settings.hooks !== "object") {
+    settings.hooks = {};
+  }
+  const hooks = settings.hooks as Record<string, unknown>;
+  if (!Array.isArray(hooks.SessionStart)) {
+    hooks.SessionStart = [];
+  }
+  const sessionStart = hooks.SessionStart as Array<unknown>;
+
+  const alreadyRegistered = sessionStart.some((h) => {
+    if (typeof h !== "object" || !h) return false;
+    const hg = h as { hooks?: Array<{ command?: string }> };
+    return hg.hooks?.some((inner) => inner.command?.includes("datadan sync"));
+  });
+
+  if (alreadyRegistered) return true;
+
+  sessionStart.push({
+    hooks: [{ type: "command", command: "npx --yes datadan sync 2>/dev/null || true" }],
+  });
+
+  try {
+    mkdirSync(clauDir, { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -509,27 +656,13 @@ function scanEnvForPostgres(envPath: string): Array<{ key: string; value: string
  * e.g. SANDBOX_DATABASE_URL → sandbox, MY_DB_URL → my, DATABASE_URL → database
  */
 function envVarToDatabaseName(envVar: string): string {
-  return envVar
+  const stripped = envVar
     .replace(/_?(DATABASE|DB|POSTGRES|PG)_?(URL|URI|STRING|DSN|CONN)?$/i, "")
     .replace(/_+$/, "")
     .toLowerCase()
-    .replace(/_/g, "-") || envVar.toLowerCase();
+    .replace(/_/g, "-");
+  return stripped || "main";
 }
-
-program
-  .command("setup")
-  .description("Initialize config and start the MCP server in one step (runs init then start)")
-  .action(async () => {
-    const configured = await runInit();
-    if (!configured) {
-      console.log();
-      console.log("Skipping server start — no databases are configured yet.");
-      console.log("Add connection strings to .env, then run: npx datadan setup");
-      return;
-    }
-    console.log();
-    await runStart({});
-  });
 
 program
   .command("config")
@@ -569,6 +702,49 @@ program
     console.log("          tables:");
     console.log("            - name: audit_log");
     console.log("              permission: read     # read-only override for this table");
+  });
+
+program
+  .command("sync")
+  .description("Re-sync CLAUDE.md and bash deny rules if datadan.config.yaml has changed (run via SessionStart hook)")
+  .action(async () => {
+    const configPath = resolve(
+      process.env.DATADAN_CONFIG ?? join(process.cwd(), CONFIG_FILENAME),
+    );
+
+    if (!existsSync(configPath)) process.exit(0);
+
+    const projectDir = dirname(configPath);
+    const stateFile = join(projectDir, ".claude", "datadan-sync-state.json");
+
+    let lastMtime = 0;
+    if (existsSync(stateFile)) {
+      try {
+        const state = JSON.parse(readFileSync(stateFile, "utf-8")) as { mtimeMs?: number };
+        lastMtime = state.mtimeMs ?? 0;
+      } catch { /* ignore */ }
+    }
+
+    const currentMtime = statSync(configPath).mtimeMs;
+    if (currentMtime <= lastMtime) process.exit(0);
+
+    loadDotenv({ path: join(projectDir, ".env"), quiet: true });
+
+    let config: DataDanConfig;
+    try {
+      config = loadConfig(configPath);
+    } catch {
+      process.exit(0);
+    }
+
+    writeAgentInstruction(config, projectDir);
+    writeBashDenyRules(projectDir);
+
+    try {
+      const clauDir = join(projectDir, ".claude");
+      mkdirSync(clauDir, { recursive: true });
+      writeFileSync(stateFile, JSON.stringify({ mtimeMs: currentMtime }), "utf-8");
+    } catch { /* ignore */ }
   });
 
 program.parse();

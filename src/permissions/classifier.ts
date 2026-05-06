@@ -6,6 +6,8 @@ export interface ClassifiedQuery {
   statementType: "select" | "insert" | "update" | "delete" | "ddl";
   requiredPermission: PermissionLevel;
   referencedTables: Array<{ schema: string; table: string }>;
+  /** True when the query has no FROM clause by design (e.g. SELECT 1, SELECT NOW()). */
+  explicitlyTableless: boolean;
 }
 
 const parser = new Parser();
@@ -124,9 +126,20 @@ export function classifyQuery(sql: string): ClassifiedQuery {
 
   const referencedTables = extractTables(sql, ast);
 
+  // A query is intentionally tableless when no statement has a FROM clause —
+  // e.g. SELECT 1, SELECT NOW(). Empty referencedTables in this case is expected,
+  // not a parser failure.
+  const explicitlyTableless =
+    referencedTables.length === 0 &&
+    statements.every((stmt) => {
+      const from = (stmt as { from?: unknown }).from;
+      return from == null || (Array.isArray(from) && from.length === 0);
+    });
+
   return {
     statementType: primaryStatementType!,
     requiredPermission: highestPermission,
     referencedTables,
+    explicitlyTableless,
   };
 }

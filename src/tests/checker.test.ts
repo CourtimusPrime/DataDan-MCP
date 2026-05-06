@@ -17,6 +17,7 @@ function makeClassified(overrides: Partial<ClassifiedQuery> = {}): ClassifiedQue
     statementType: "select",
     requiredPermission: "read",
     referencedTables: [{ schema: "public", table: "users" }],
+    explicitlyTableless: false,
     ...overrides,
   };
 }

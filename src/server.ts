@@ -13,7 +13,6 @@ import { registerExecuteTool } from "./tools/execute.js";
 import { registerDeleteTool } from "./tools/delete.js";
 import { registerMigrationTool } from "./tools/migration.js";
 import { registerDbmlTool } from "./tools/dbml.js";
-import { registerRegisterTool } from "./tools/register.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -103,9 +102,6 @@ export function createServer(
   registerDeleteTool(server, config, connectionManager);
   registerMigrationTool(server, config, connectionManager);
   registerDbmlTool(server, config, connectionManager);
-  if (configPath) {
-    registerRegisterTool(server, config, connectionManager, configPath);
-  }
 
   return server;
 }
